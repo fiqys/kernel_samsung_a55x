@@ -817,6 +817,8 @@
   schedule
   schedule_timeout
   scnprintf
+  scsi_execute_cmd
+  scsi_print_sense_hdr
   seq_lseek
   seq_printf
   seq_putc
@@ -1991,8 +1993,6 @@
   blk_rq_map_kern
   scsi_block_when_processing_errors
   __scsi_device_lookup_by_target
-  scsi_execute_cmd
-  scsi_print_sense_hdr
   sdev_prefix_printk
 
 # required by sec_audio_debug.ko
@@ -2493,6 +2493,12 @@
   kobject_add
   kobject_init
   of_cpu_node_to_id
+  sbitmap_weight
+  scsi_device_get
+  scsi_device_put
+  scsi_device_quiesce
+  scsi_device_resume
+  __scsi_iterate_devices
   __traceiter_android_vh_ufs_check_int_errors
   __traceiter_android_vh_ufs_compl_command
   __traceiter_android_vh_ufs_mcq_abort

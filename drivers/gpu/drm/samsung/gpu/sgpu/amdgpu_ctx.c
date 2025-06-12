@@ -197,7 +197,7 @@ static int amdgpu_ctx_init(struct amdgpu_device *adev,
 	ctx->reset_counter = atomic_read(&adev->gpu_reset_counter);
 	ctx->reset_counter_query = ctx->reset_counter;
 	ctx->vram_lost_counter = atomic_read(&adev->vram_lost_counter);
-	ctx->init_priority = priority;
+	ctx->init_priority = DRM_SCHED_PRIORITY_NORMAL;
 	ctx->override_priority = DRM_SCHED_PRIORITY_UNSET_FOR_SGPU;
 	ctx->fpriv = fpriv;
 

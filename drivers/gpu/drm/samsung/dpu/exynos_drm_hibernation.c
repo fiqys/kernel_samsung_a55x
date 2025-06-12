@@ -20,6 +20,7 @@
 #include <linux/sched.h>
 #include <linux/err.h>
 #include <linux/atomic.h>
+#include <linux/timer.h>
 #include <uapi/linux/sched/types.h>
 
 #include <dpu_trace.h>
@@ -237,8 +238,10 @@ out:
 	if (ret == -EDEADLK) {
 		drm_atomic_state_clear(state);
 		ret = drm_modeset_backoff(&ctx);
-		if (!ret)
+		if (!ret) {
+			hiber_err("retry to commit self refresh\n");
 			goto retry;
+		}
 	}
 
 	drm_atomic_state_put(state);
@@ -262,6 +265,7 @@ out_drop_locks:
 	return ret;
 }
 
+#define HIBER_COMMIT_TIMEOUT msecs_to_jiffies(1000)
 static void exynos_hibernation_enter(struct exynos_hibernation *hiber)
 {
 	struct decon_device *decon = hiber->decon;
@@ -283,7 +287,9 @@ static void exynos_hibernation_enter(struct exynos_hibernation *hiber)
 	DPU_EVENT_LOG("ENTER_HIBERNATION_IN", decon->crtc, 0, "DPU POWER %s",
 			pm_runtime_active(exynos_crtc->dev) ? "ON" : "OFF");
 
+	mod_timer(&hiber->debug_timer, jiffies + HIBER_COMMIT_TIMEOUT);
 	ret = exynos_crtc_self_refresh_update(&exynos_crtc->base, true);
+	del_timer(&hiber->debug_timer);
 	if (ret) {
 		hiber_err("failed to commit self refresh\n");
 		goto out;
@@ -415,6 +421,34 @@ static ssize_t hiber_enter_store(struct device *dev,
 }
 static DEVICE_ATTR_RW(hiber_enter);
 
+static void hiber_timeout_handler(struct timer_list *arg)
+{
+	struct exynos_hibernation *hiber = from_timer(hiber, arg, debug_timer);
+	struct exynos_drm_crtc *exynos_crtc = hiber->decon->crtc;
+	struct kthread_worker *worker;
+	struct kthread_work *work;
+	bool is_drm_locked;
+
+	hiber_err("hiber work was pended!!!\n");
+
+	is_drm_locked = drm_modeset_is_locked(&exynos_crtc->base.mutex);
+
+	hiber_err("crtc(%d) mutex(%d)\n", drm_crtc_index(&exynos_crtc->base), is_drm_locked);
+
+	worker = &exynos_crtc->worker;
+	raw_spin_lock_irq(&worker->lock);
+	work = worker->current_work;
+	if (work)
+		hiber_err("Current work: <function=%pS>", work->func);
+	else
+		hiber_err("Current work: none");
+
+	list_for_each_entry(work, &worker->work_list, node) {
+		hiber_err("Pending work: <function=%pS>", work->func);
+	}
+	raw_spin_unlock_irq(&worker->lock);
+}
+
 struct exynos_hibernation *
 exynos_hibernation_register(struct exynos_drm_crtc *exynos_crtc)
 {
@@ -458,6 +492,7 @@ exynos_hibernation_register(struct exynos_drm_crtc *exynos_crtc)
 
 	kthread_init_work(&hibernation->work, exynos_hibernation_handler);
 
+	timer_setup(&hibernation->debug_timer, hiber_timeout_handler, 0);
 	hiber_info("display hibernation is supported\n");
 
 	/* register asynchronous hibernation early wakeup feature */

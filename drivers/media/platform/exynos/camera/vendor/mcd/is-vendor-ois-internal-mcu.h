@@ -109,6 +109,7 @@ struct ois_mcu_dev {
 	bool			ois_tele2_init;
 	bool			ois_hw_check;
 	bool			ois_fadeupdown;
+	struct work_struct	mcu_power_on_work; 
 };
 
 enum is_efs_state {

@@ -1735,7 +1735,7 @@ struct slsi_dev {
 	struct scsc_service        *service;
 	struct slsi_chip_info_mib  chip_info_mib;
 	struct slsi_plat_info_mib  plat_info_mib;
-	u16                        reg_dom_version;
+	u32                        reg_dom_version;
 
 #ifdef CONFIG_SCSC_WLAN_MUTEX_DEBUG
 	struct slsi_mutex          netdev_add_remove_mutex;
@@ -1803,6 +1803,7 @@ struct slsi_dev {
 	struct scsc_wake_lock			wlan_wl_ma;
 	struct scsc_wake_lock			wlan_wl_roam;
 	struct scsc_wake_lock			wlan_wl_init;
+	struct scsc_wake_lock                   wlan_wl_tx_sched;
 #else
 	struct wake_lock                        wlan_wl;
 	struct wake_lock			wlan_wl_mlme_evt;
@@ -1810,6 +1811,7 @@ struct slsi_dev {
 	struct wake_lock                        wlan_wl_ma;
 	struct wake_lock                        wlan_wl_roam;
 	struct wake_lock                        wlan_wl_init;
+	struct wake_lock                        wlan_wl_tx_sched;
 #endif
 #endif
 	struct slsi_sig_send       sig_wait;

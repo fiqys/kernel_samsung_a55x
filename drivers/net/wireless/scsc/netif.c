@@ -16,9 +16,9 @@
 #include "netif.h"
 #include "dev.h"
 #include "mgt.h"
+#include "ba.h"
 #ifdef CONFIG_SCSC_WLAN_NAPI_PER_NETDEV
 #include "sap_ma.h"
-#include "ba.h"
 #endif
 #ifndef CONFIG_SCSC_WLAN_TX_API
 #include "scsc_wifi_fcq.h"
@@ -435,6 +435,16 @@ static int slsi_net_open(struct net_device *dev)
 	if (ndev_vif->ifnum < SLSI_NAN_DATA_IFINDEX_START) {
 		netif_carrier_on(dev);
 		netif_dormant_on(dev);
+	} else {
+#ifdef CONFIG_SCSC_WLAN_TX_API
+		if (!slsi_vif_activated_post(sdev, dev, ndev_vif)) {
+			SLSI_ERR(sdev, "fail to activate NAN NDI VIF\n");
+		}
+#endif
+#ifdef CONFIG_SCSC_WLAN_LOAD_BALANCE_MANAGER
+		slsi_lbm_netdev_activate(sdev, dev);
+#endif
+		slsi_rx_ba_update_timer(sdev, dev, SLSI_RX_BA_EVENT_VIF_CONNECTED);
 	}
 	sdev->netdev_up_count++;
 	slsi_spinlock_unlock(&sdev->netdev_lock);

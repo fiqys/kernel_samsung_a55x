@@ -197,13 +197,11 @@ static int s2mf301_fg_read_reg(struct i2c_client *client, int reg, u8 *buf)
 static void s2mf301_fg_test_read(struct i2c_client *client)
 {
 	static int reg_list[] = {
-		0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0E, 0x0F,
-		0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x1A, 0x1B, 0x1E, 0x1F,
-		0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x32, 0x33, 0x34, 0x35,
-		0x40, 0x41, 0x43, 0x44, 0x45, 0x48, 0x49, 0x4A, 0x4B, 0x50,
-		0x51, 0x52, 0x53, 0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x67, 0x70,
-		0x71, 0x72, 0x73, 0x7B, 0x80, 0x81, 0x88, 0x89, 0x8E, 0x8F,
-		0x90, 0x91
+		0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x1A, 0x1B,
+		0x1E, 0x1F, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x40, 0x41,
+		0x43, 0x44, 0x45, 0x48, 0x49, 0x4A, 0x4B, 0x50, 0x51, 0x52,
+		0x53, 0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x67, 0x68, 0x69, 0x70,
+		0x71, 0x72, 0x73, 0x7B, 0x88, 0x89, 0x8E, 0x8F, 0x90, 0x91
 	};
 	u8 data = 0;
 	char str[1016] = {0,};
@@ -294,16 +292,16 @@ static void s2mf301_reset_fg(struct s2mf301_fuelgauge_data *fuelgauge)
 	s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, 0x6F, temp);
 
 	/* Set temperature load compensation coefficient */
-	s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, 0x71, 0x41);
-	s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, 0x73, 0x43);
+	s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, 0x71, 0x7F);
+	s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, 0x73, 0x7F);
 	s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, 0x70, 0x01);
-	s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, 0x72, 0x0);
-	s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, 0x6E, 0x10);
-	s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, 0x7B, 0x0A);
+	s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, 0x72, 0x19);
+	s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, 0x6E, 0x0D);
+	s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, 0x7B, 0x02);
 
 	/* Dumpdone. Re-calculate SOC */
 	s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, 0x1E, 0x0F);
-	msleep(300);
+	msleep(700);
 
 	s2mf301_read_reg_byte(fuelgauge->i2c, 0x03, &temp);
 	temp |= 0x40;
@@ -943,14 +941,11 @@ static int s2mf301_get_compen_soc(struct s2mf301_fuelgauge_data *fuelgauge)
 		if (ret < 0)
 			pr_err("%s: Fail to execute property\n", __func__);
 		fuelgauge->temperature = value.intval;
-		temp_i2c = fuelgauge->temperature / 10;
+		temp_i2c = (fuelgauge->temperature / 10) & 0xFF;
 		pr_info("%s: temperature from battery: %d\n", __func__, fuelgauge->temperature);
 
 		/* W/A use system temperature */
-		if (fuelgauge->temperature >= 0)
-			s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, S2MF301_REG_TEMP_I2C, temp_i2c);
-		else
-			s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, S2MF301_REG_TEMP_I2C, ~(temp_i2c & 0xFF) + 1);
+		s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, S2MF301_REG_TEMP_I2C, (u8)temp_i2c);
 	} else
 		fuelgauge->temperature = s2mf301_get_temperature(fuelgauge);
 
@@ -1094,8 +1089,19 @@ batcap_learn_init:
 static void s2mf301_low_voltage_wa(struct s2mf301_fuelgauge_data *fuelgauge)
 {
 	u8 temp = 0;
+	u8 vm;
+
+	s2mf301_read_reg_byte(fuelgauge->i2c, S2MF301_REG_rLVBAT_TH0, &vm);
 
 	if (fuelgauge->temperature > fuelgauge->low_temp_limit) {
+		if (vm == S2MF301_LTEMP_VM0) {
+			pr_info("%s, Normal Temperature, Change VM value\n", __func__);
+			s2mf301_write_and_verify_reg_byte(fuelgauge->i2c,
+					S2MF301_REG_rLVBAT_TH0, S2MF301_NTEMP_VM0);
+			s2mf301_write_and_verify_reg_byte(fuelgauge->i2c,
+					S2MF301_REG_rLVBAT_TH1, S2MF301_NTEMP_VM1);
+		}
+
 		if ((fuelgauge->avg_vbat < fuelgauge->low_voltage_limit) &&
 				(fuelgauge->avg_curr < -50) && (fuelgauge->rsoc > 300)) {
 			dev_info(&fuelgauge->i2c->dev, "%s: Low voltage WA. Make rawsoc 0\n", __func__);
@@ -1111,6 +1117,14 @@ static void s2mf301_low_voltage_wa(struct s2mf301_fuelgauge_data *fuelgauge)
 			s2mf301_write_and_verify_reg_byte(fuelgauge->i2c, 0x29, temp);
 		}
 	} else {
+		if (vm == S2MF301_NTEMP_VM0) {
+			pr_info("%s, Low Temperature, Change VM value\n", __func__);
+			s2mf301_write_and_verify_reg_byte(fuelgauge->i2c,
+					S2MF301_REG_rLVBAT_TH0, S2MF301_LTEMP_VM0);
+			s2mf301_write_and_verify_reg_byte(fuelgauge->i2c,
+					S2MF301_REG_rLVBAT_TH1, S2MF301_LTEMP_VM1);
+		}
+
 		if ((fuelgauge->avg_vbat < fuelgauge->low_voltage_limit_lowtemp) &&
 				(fuelgauge->avg_curr < -50) && (fuelgauge->info.soc > 100)) {
 			dev_info(&fuelgauge->i2c->dev, "%s: Low voltage WA. Make UI SOC 0\n", __func__);

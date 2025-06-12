@@ -71,7 +71,7 @@ static int amdgpu_cs_user_fence_chunk(struct amdgpu_cs_parser *p,
 		goto error_unref;
 	}
 
-	if (amdgpu_ttm_tt_get_usermm(bo->tbo.ttm)) {
+	if (amdgpu_ttm_tt_is_userptr(bo->tbo.ttm)) {
 		r = -EINVAL;
 		goto error_unref;
 	}
@@ -508,11 +508,6 @@ static int amdgpu_cs_list_validate(struct amdgpu_cs_parser *p,
 
 	list_for_each_entry(lobj, validated, tv.head) {
 		struct amdgpu_bo *bo = ttm_to_amdgpu_bo(lobj->tv.bo);
-		struct mm_struct *usermm;
-
-		usermm = amdgpu_ttm_tt_get_usermm(bo->tbo.ttm);
-		if (usermm && usermm != current->mm)
-			return -EPERM;
 
 		if (amdgpu_ttm_tt_is_userptr(bo->tbo.ttm) &&
 		    lobj->user_invalidated && lobj->user_pages) {

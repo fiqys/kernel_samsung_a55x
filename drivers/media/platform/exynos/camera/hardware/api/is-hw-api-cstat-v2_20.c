@@ -1386,6 +1386,7 @@ u32 cstat_hw_is_occurred(ulong state, enum cstat_event_type type)
 		break;
 	case CSTAT_LIC_ERR:
 		mask = (BIT_MASK(LIC_OVERFLOW) |
+			BIT_MASK(CINFIFO_PCNT_ERR) |
 			BIT_MASK(LIC_ERR));
 		break;
 	case CSTAT_CDAF:

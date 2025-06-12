@@ -975,6 +975,13 @@ int __mfc_update_dpb_fd(struct mfc_ctx *ctx, struct vb2_buffer *vb, int index)
 	if (dec->dpb[index].fd[0] == vb->planes[0].m.fd)
 		mfc_ctx_debug(3, "[REFINFO] same dma_buf has same fd\n");
 
+	if (dec->dpb[index].new_fd != -1) {
+		dec->ref_buf[dec->refcnt].fd[0] = dec->dpb[index].fd[0];
+		dec->refcnt++;
+		dec->dpb[index].fd[0] = dec->dpb[index].new_fd;
+	}
+
+
 	dec->dpb[index].new_fd = vb->planes[0].m.fd;
 	mfc_ctx_debug(3, "[REFINFO] index %d update fd: %d -> %d after release\n",
 			vb->index, dec->dpb[index].fd[0],

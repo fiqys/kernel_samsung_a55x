@@ -162,6 +162,11 @@ struct is_ois *is_ois_get_device(struct is_core *core)
 	struct is_device_sensor *device = NULL;
 
 	device = &core->sensor[0];
+	if (!device)
+		return NULL;
+	if (!device->mcu)
+		return NULL;
+
 	ois_device = device->mcu->ois;
 
 	return ois_device;

@@ -270,6 +270,9 @@ static int __mfc_core_parse_dt(struct device_node *np, struct mfc_core *core)
 	}
 	of_property_read_u32(np_qos, "num_cluster",
 			&pdata->qos_boost_table->num_cluster);
+	of_property_read_u32_array(np_qos, "num_cpu",
+			&pdata->qos_boost_table->num_cpu[0],
+			pdata->qos_boost_table->num_cluster);
 	of_property_read_u32(np_qos, "freq_mfc",
 			&pdata->qos_boost_table->freq_mfc);
 	of_property_read_u32(np_qos, "freq_int",

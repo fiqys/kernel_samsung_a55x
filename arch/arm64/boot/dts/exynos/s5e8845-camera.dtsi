@@ -259,6 +259,7 @@
 				cma-alloc;
 				size = <0x1000000>;
 				align = <0x200000>; /* 64K for S2MPU & ICPU MMU 2M page */
+				permanent;
 				signature-size = <0x210>; /* dec. 528 byte */
 				signature-check;
 				no-optimization;

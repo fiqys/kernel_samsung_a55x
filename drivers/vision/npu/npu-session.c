@@ -155,7 +155,7 @@ static save_result_func get_notify_func(const nw_cmd_e nw_cmd)
 		return npu_session_save_result;
 }
 
-static int npu_session_put_nw_req(struct npu_session *session, nw_cmd_e nw_cmd)
+int npu_session_put_nw_req(struct npu_session *session, nw_cmd_e nw_cmd)
 {
 	int ret = 0;
 
@@ -2675,8 +2675,10 @@ int __prepare_IMB_info(struct npu_session *session, struct addr_info *IMB_av, st
 	return ret;
 
 p_err:
-	if (likely(IMB_mem_buf))
+	if (likely(IMB_mem_buf)) {
 		kfree(IMB_mem_buf);
+		IMB_mem_buf = NULL;
+	}
 	return ret;
 }
 #endif

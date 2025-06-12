@@ -773,7 +773,7 @@ static u32 dw_mci_prep_stop_abort(struct dw_mci *host, struct mmc_command *cmd)
 	return cmdr;
 }
 
-static inline void dw_mci_set_cto(struct dw_mci *host)
+static inline void dw_mci_set_cto(struct dw_mci *host, struct mmc_command *cmd)
 {
 	unsigned int cto_clks;
 	unsigned int cto_div;
@@ -788,8 +788,23 @@ static inline void dw_mci_set_cto(struct dw_mci *host)
 	cto_ms = DIV_ROUND_UP_ULL((u64)MSEC_PER_SEC * cto_clks * cto_div,
 				  host->bus_hz);
 
-	/* add a bit spare time */
-	cto_ms += 25;
+	if (cmd->opcode == SD_SWITCH_VOLTAGE) {
+		/*
+		 * Section: 7.4.1.2 Voltage Switch Normal Scenario in DWC MSH
+		 * Databook says to fail after 2ms w/ no response, but evidence
+		 * shows that sometimes the cmd11 interrupt takes over 130ms.
+		 * We'll set to 500ms, plus an extra jiffy just in case jiffies
+		 * is just about to roll over.
+		 *
+		 * We do this whole thing under spinlock and only if the
+		 * command hasn't already completed (indicating the the irq
+		 * already ran so we don't want the timeout).
+		 */
+		cto_ms = 500;
+	} else {
+		/* add a bit spare time */
+		cto_ms += 10;
+	}
 
 	/*
 	 * The durations we're working with are fairly short so we have to be
@@ -834,7 +849,7 @@ static void dw_mci_start_command(struct dw_mci *host, struct mmc_command *cmd, u
 
 	/* response expected command only */
 	if (cmd_flags & SDMMC_CMD_RESP_EXP)
-		dw_mci_set_cto(host);
+		dw_mci_set_cto(host, cmd);
 }
 
 static inline void send_stop_abort(struct dw_mci *host, struct mmc_data *data)
@@ -1841,25 +1856,6 @@ static void __dw_mci_start_request(struct dw_mci *host,
 	dw_mci_debug_req_log(host, mrq, STATE_REQ_START, 0);
 	dw_mci_start_command(host, cmd, cmdflags);
 
-	if (cmd->opcode == SD_SWITCH_VOLTAGE) {
-		unsigned long irqflags;
-
-		/*
-		 * Databook says to fail after 2ms w/ no response, but evidence
-		 * shows that sometimes the cmd11 interrupt takes over 130ms.
-		 * We'll set to 500ms, plus an extra jiffy just in case jiffies
-		 * is just about to roll over.
-		 *
-		 * We do this whole thing under spinlock and only if the
-		 * command hasn't already completed (indicating the the irq
-		 * already ran so we don't want the timeout).
-		 */
-		spin_lock_irqsave(&host->irq_lock, irqflags);
-		if (!test_bit(EVENT_CMD_COMPLETE, &host->pending_events))
-			mod_timer(&host->cmd11_timer, jiffies + msecs_to_jiffies(500) + 1);
-		spin_unlock_irqrestore(&host->irq_lock, irqflags);
-	}
-
 	if (mrq->stop)
 		host->stop_cmdr = dw_mci_prepare_command(slot->mmc, mrq->stop);
 	else
@@ -2141,7 +2137,7 @@ static int dw_mci_switch_voltage(struct mmc_host *mmc, struct mmc_ios *ios)
 	}
 
 	mci_writel(host, UHS_REG, uhs);
-	del_timer(&host->cmd11_timer);
+	del_timer(&host->cto_timer);
 
 	return 0;
 }
@@ -3357,24 +3353,19 @@ static irqreturn_t dw_mci_interrupt(int irq, void *dev_id)
 		}
 
 		/* Check volt switch first, since it can look like an error */
-		if (pending & SDMMC_INT_VOLT_SWITCH) {
+		if ((host->state == STATE_SENDING_CMD11) && (pending & SDMMC_INT_VOLT_SWITCH)) {
 			mci_writel(host, RINTSTS, SDMMC_INT_VOLT_SWITCH);
 			pending &= ~SDMMC_INT_VOLT_SWITCH;
 
 			/*
-			 * Hold the lock; we know cmd11_timer can't be kicked
+			 * Hold the lock; we know cto_timer can't be kicked
 			 * off after the lock is released, so safe to delete.
 			 */
-			if (host->state == STATE_SENDING_CMD11) {
-				dw_mci_debug_cmd_log(host->cmd, host, false, DW_MCI_FLAG_VOLT_SWITCH, status);
-				spin_lock_irqsave(&host->irq_lock, irqflags);
-				dw_mci_cmd_interrupt(host, pending);
-				spin_unlock_irqrestore(&host->irq_lock, irqflags);
-			} else {
-				dev_err(host->dev, "get voltage switch interrupt after cto\n");
-			}
-
-			del_timer(&host->cmd11_timer);
+			dw_mci_debug_cmd_log(host->cmd, host, false, DW_MCI_FLAG_VOLT_SWITCH, status);
+			spin_lock_irqsave(&host->irq_lock, irqflags);
+			dw_mci_cmd_interrupt(host, pending);
+			spin_unlock_irqrestore(&host->irq_lock, irqflags);
+			del_timer(&host->cto_timer);
 		}
 
 		if (pending & DW_MCI_CMD_ERROR_FLAGS) {
@@ -3858,22 +3849,6 @@ bool dw_mci_fifo_reset(struct device *dev, struct dw_mci *host)
 	return false;
 }
 
-
-static void dw_mci_cmd11_timer(struct timer_list *t)
-{
-	struct dw_mci *host = from_timer(host, t, cmd11_timer);
-
-	if (host->state != STATE_SENDING_CMD11) {
-		dev_warn(host->dev, "Unexpected CMD11 timeout\n");
-		return;
-	}
-
-	host->cmd_status = SDMMC_INT_RTO;
-	set_bit(EVENT_CMD_COMPLETE, &host->pending_events);
-	dw_mci_debug_req_log(host, host->mrq, STATE_REQ_CMD_COMPLETE_CMD11, host->state);
-	tasklet_schedule(&host->tasklet);
-}
-
 static void dw_mci_cto_timer(struct timer_list *t)
 {
 	struct dw_mci *host = from_timer(host, t, cto_timer);
@@ -4302,7 +4277,6 @@ int dw_mci_probe(struct dw_mci *host)
 				__func__, ret);
 	}
 
-	timer_setup(&host->cmd11_timer, dw_mci_cmd11_timer, 0);
 	timer_setup(&host->cto_timer, dw_mci_cto_timer, 0);
 	if (host->pdata->sw_drto)
 		timer_setup(&host->dto_timer, dw_mci_dto_timer, 0);

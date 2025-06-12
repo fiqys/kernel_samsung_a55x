@@ -3664,8 +3664,12 @@ static int slsi_set_roaming_state(struct wiphy *wiphy, struct wireless_dev *wdev
 		}
 	}
 
-	SLSI_DBG1_NODEV(SLSI_GSCAN, "SUBCMD_SET_ROAMING_STATE roam_state = %d\n", roam_state);
-	ret = slsi_set_mib_roam(sdev, NULL, SLSI_PSID_UNIFI_ROAMING_ACTIVATED, roam_state);
+	if (!slsi_is_rf_test_mode_enabled()) {
+		SLSI_DBG1_NODEV(SLSI_GSCAN, "SUBCMD_SET_ROAMING_STATE roam_state = %d\n", roam_state);
+		ret = slsi_set_mib_roam(sdev, NULL, SLSI_PSID_UNIFI_ROAMING_ACTIVATED, roam_state);
+	} else {
+		SLSI_DBG1_NODEV(SLSI_GSCAN, "Ignoring SUBCMD_SET_ROAMING_STATE for roam_state = %d in RF Test Mode.\n", roam_state);
+	}
 	if (ret < 0)
 		SLSI_ERR_NODEV("Failed to set roaming state\n");
 

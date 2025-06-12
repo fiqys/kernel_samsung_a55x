@@ -839,7 +839,6 @@ static int __npu_vertex_bootup(struct file *file, struct vs4l_ctrl *ctrl)
 	struct npu_scheduler_info *info;
 
 	info = npu_scheduler_get_info();
-	session->hids = ctrl->value;
 #if !IS_ENABLED(CONFIG_DSP_USE_VS4L)
 	if (ctrl->value == NPU_HWDEV_ID_DSP) {
 		npu_err("recv err cmd\n");
@@ -847,6 +846,7 @@ static int __npu_vertex_bootup(struct file *file, struct vs4l_ctrl *ctrl)
 	}
 #endif
 
+	session->hids = ctrl->value;
 	/* check npu_device emergency error */
 	ret = check_emergency_vctx(vctx);
 	if (ret)

@@ -469,6 +469,7 @@ void usbpd_set_ops(struct device *dev, usbpd_phy_ops_type *ops)
 	pd_data->phy_ops.get_status = ops->get_status;
 	pd_data->phy_ops.poll_status = ops->poll_status;
 	pd_data->phy_ops.driver_reset = ops->driver_reset;
+	pd_data->phy_ops.give_sink_cap = ops->give_sink_cap;
 	pd_data->phy_ops.set_otg_control = ops->set_otg_control;
 	pd_data->phy_ops.get_vbus_short_check = ops->get_vbus_short_check;
 	pd_data->phy_ops.pd_vbus_short_check = ops->pd_vbus_short_check;
@@ -535,6 +536,7 @@ void usbpd_set_ops(struct device *dev, usbpd_phy_ops_type *ops)
 	pd_data->phy_ops.ops_check_pps_irq_tx_req = ops->ops_check_pps_irq_tx_req;
 	pd_data->phy_ops.ops_check_pps_irq = ops->ops_check_pps_irq;
 	pd_data->phy_ops.ops_manual_retry = ops->ops_manual_retry;
+	pd_data->phy_ops.ops_cc_hiccup = ops->ops_cc_hiccup;
 }
 EXPORT_SYMBOL(usbpd_set_ops);
 
@@ -1092,6 +1094,8 @@ int usbpd_init(struct device *dev, void *phy_driver_data)
 	pd_data->usbpd_d.data = (void *)pd_data;
 	pd_data->man = register_usbpd(&pd_data->usbpd_d);
 #endif
+
+	pd_data->cc_hiccup_delay = 5;
 
 	INIT_WORK(&pd_data->worker, usbpd_policy_work);
 

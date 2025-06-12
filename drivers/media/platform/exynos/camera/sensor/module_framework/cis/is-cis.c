@@ -94,6 +94,7 @@ int sensor_cis_write_registers(struct v4l2_subdev *subdev, const struct sensor_r
 	int index_str = 0, index_next = 0;
 	int start_data = 0;
 	int burst_num = 1;
+	bool use_8bit_addr = false;
 	u8 *burst_data;
 
 	WARN_ON(!subdev);
@@ -108,6 +109,8 @@ int sensor_cis_write_registers(struct v4l2_subdev *subdev, const struct sensor_r
 		err("client is NULL");
 		return -EINVAL;
 	}
+
+	use_8bit_addr = cis->sensor_info->use_8bit_addr;
 
 	dbg_sensor(1, "[%s][%d] sensor setting start\n", __func__, cis->cis_data->sen_vsync_count);
 	cis->stream_state = CIS_STREAM_INIT;
@@ -175,7 +178,15 @@ int sensor_cis_write_registers(struct v4l2_subdev *subdev, const struct sensor_r
 			break;
 
 		default:
-			if (regset.regs[i + IXC_BYTE] == 0x1) {
+			if (use_8bit_addr) {
+				ret = cis->ixc_ops->addr8_write8(cis->client,
+				(u8)regset.regs[i + IXC_ADDR], (u8)regset.regs[i + IXC_DATA]);
+				if (ret < 0) {
+					err("is_sensor_addr8_write8 fail, ret(%d), addr(%#x), data(%#x)",
+							ret, (u8)regset.regs[i + IXC_ADDR], (u8)regset.regs[i + IXC_DATA]);
+					goto p_err;
+				}
+			} else if (regset.regs[i + IXC_BYTE] == 0x1) {
 				ret = cis->ixc_ops->write8(cis->client,
 					regset.regs[i + IXC_ADDR], regset.regs[i + IXC_DATA]);
 				if (ret < 0) {
@@ -2247,6 +2258,13 @@ int sensor_cis_parse_dt(struct device *dev, struct v4l2_subdev *subdev)
 	}
 	probe_info("%s f-number %d\n", __func__, cis->aperture_num);
 
+	ret = of_property_read_u32(dnode, "orientation", &cis->orientation);
+	if (ret) {
+		warn("orientation read is fail(%d), use default value", ret);
+		cis->orientation = 0;
+	}
+	probe_info("%s orientation %d\n", __func__, cis->orientation);
+
 	cis->use_initial_ae = of_property_read_bool(dnode, "use_initial_ae");
 	probe_info("%s use initial_ae(%d)\n", __func__, cis->use_initial_ae);
 
@@ -2625,6 +2643,7 @@ void sensor_cis_log_status(struct is_cis *cis,
 	int ret;
 	int i;
 	u16 data;
+	bool use_8bit_addr = cis->sensor_info->use_8bit_addr;
 
 	warn("[%s] *******************************", fn);
 
@@ -2632,8 +2651,10 @@ void sensor_cis_log_status(struct is_cis *cis,
 
 	for (i = 0; i < num; i++) {
 		data = 0;
-		if  (log[i].type == I2C_WRITE) {
-			if  (log[i].size == 8)
+		if (log[i].type == I2C_WRITE) {
+			if (use_8bit_addr)
+				ret = cis->ixc_ops->addr8_write8(cis->client, log[i].addr, log[i].data);
+			else if (log[i].size == 8)
 				ret = cis->ixc_ops->write8(cis->client, log[i].addr, log[i].data);
 			else
 				ret = cis->ixc_ops->write16(cis->client, log[i].addr, log[i].data);
@@ -2641,7 +2662,9 @@ void sensor_cis_log_status(struct is_cis *cis,
 			if (!ret && log[i].name)
 				warn("%s", log[i].name);
 		} else {
-			if  (log[i].size == 8)
+			if (use_8bit_addr)
+				ret = cis->ixc_ops->addr8_read8(cis->client, log[i].addr, (u8 *)&data);
+			else if (log[i].size == 8)
 				ret = cis->ixc_ops->read8(cis->client, log[i].addr, (u8 *)&data);
 			else
 				ret = cis->ixc_ops->read16(cis->client, log[i].addr, &data);

@@ -184,12 +184,7 @@ module_param_cb(monitor_vif_num, &slsi_monitor_vif_num_ops, &monitor_vif_num, S_
 
 static int slsi_5ghz_all_chans[] = {36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124,
 				    128, 132, 136, 140, 144, 149, 153, 157, 161,
-#ifdef CONFIG_SCSC_UNII4
-				    165, 169, 173, 177
-#else
-				    165
-#endif
-};
+				    165, 169, 173, 177};
 
 static int slsi_mib_open_file(struct slsi_dev *sdev, struct slsi_dev_mib_info *mib_info, const struct firmware **fw);
 static int slsi_mib_close_file(struct slsi_dev *sdev, const struct firmware *e);
@@ -312,12 +307,10 @@ static ssize_t sysfs_show_version_info(struct kobject *kobj,
 			"f/w_ver: %s\n"
 			"hcf_ver_hw: %s\n"
 			"hcf_ver_sw: %s\n"
-			"regDom_ver: %d.%d\n",
-			build_id_drv,
-			build_id_fw,
-			sdev->mib[0].platform,
-			sdev->mib[1].platform,
-			((sdev->reg_dom_version >> 8) & 0xFF), (sdev->reg_dom_version & 0xFF));
+			"regDom_ver: %d.%d.%d\n",
+			build_id_drv, build_id_fw, sdev->mib[0].platform, sdev->mib[1].platform,
+			(sdev->reg_dom_version >> 16) & 0xFF, (sdev->reg_dom_version >> 8) & 0xFF,
+			sdev->reg_dom_version & 0xFF);
 }
 
 /* Register sysfs version information */
@@ -686,19 +679,15 @@ static void write_wifi_version_info_file(struct slsi_dev *sdev)
 		 "f/w_ver: %s\n"
 		 "hcf_ver_hw: %s\n"
 		 "hcf_ver_sw: %s\n"
-		 "regDom_ver: %d.%d\n",
-		 build_id_drv,
-		 build_id_fw,
-		 sdev->mib[0].platform,
-		 sdev->mib[1].platform,
-		 ((sdev->reg_dom_version >> 8) & 0xFF), (sdev->reg_dom_version & 0xFF));
+		 "regDom_ver: %d.%d.%d\n",
+		 build_id_drv, build_id_fw, sdev->mib[0].platform, sdev->mib[1].platform,
+		 (sdev->reg_dom_version >> 16) & 0xFF, (sdev->reg_dom_version >> 8) & 0xFF,
+		 sdev->reg_dom_version & 0xFF);
 #else
 	/* O-OS, or unknown */
-	snprintf(buf, sizeof(buf),
-		 "%s (f/w_ver: %s)\nregDom_ver: %d.%d\n",
-		 build_id_drv,
-		 build_id_fw,
-		 ((sdev->reg_dom_version >> 8) & 0xFF), (sdev->reg_dom_version & 0xFF));
+	snprintf(buf, sizeof(buf), "%s (f/w_ver: %s)\nregDom_ver: %d.%d.%d\n", build_id_drv, build_id_fw,
+		 (sdev->reg_dom_version >> 16) & 0xFF, (sdev->reg_dom_version >> 8) & 0xFF,
+		 sdev->reg_dom_version & 0xFF);
 #endif
 
 /* If SCSC_SEP_VERSION is not known, avoid writing the file, as it could go to the wrong
@@ -1279,27 +1268,11 @@ void slsi_stop_chip(struct slsi_dev *sdev)
 void slsi_ndl_vif_cleanup(struct slsi_dev *sdev, struct net_device *dev, bool hw_available)
 {
 	struct netdev_vif *ndev_vif = netdev_priv(dev);
-	int i;
-	struct slsi_peer *peer;
-	u32 ndp_instance_id;
-	struct net_device *nan_mgmt_dev = slsi_get_netdev_locked(sdev, SLSI_NET_INDEX_NAN);
 
 	WLBT_WARN_ON(!SLSI_MUTEX_IS_LOCKED(sdev->netdev_add_remove_mutex));
 	WLBT_WARN_ON(!SLSI_MUTEX_IS_LOCKED(ndev_vif->vif_mutex));
 	netif_carrier_off(dev);
-	slsi_spinlock_lock(&ndev_vif->peer_lock);
-	for (i = 0; i < SLSI_ADHOC_PEER_CONNECTIONS_MAX; i++) {
-		peer = ndev_vif->peer_sta_record[i];
-		while (peer && peer->valid) {
-			ndp_instance_id = slsi_nan_get_ndp_from_ndl_local_ndi(nan_mgmt_dev, peer->ndl_vif, dev->dev_addr);
-			slsi_ps_port_control(sdev, dev, peer, SLSI_STA_CONN_STATE_DISCONNECTED);
-			peer->ndp_count--;
-			if (peer->ndp_count == 0)
-				slsi_peer_remove(sdev, dev, peer);
-		}
-	}
 
-	slsi_spinlock_unlock(&ndev_vif->peer_lock);
 	SLSI_DBG2(sdev, SLSI_INIT_DEINIT, "nan.ndp_count: %d , vif_activated:%d\n", ndev_vif->nan.ndp_count, ndev_vif->activated);
 	slsi_release_dp_resources(sdev, dev, ndev_vif);
 	slsi_rx_ba_update_timer(sdev, dev, SLSI_RX_BA_EVENT_VIF_TERMINATED);
@@ -4931,7 +4904,7 @@ int  slsi_set_arp_packet_filter(struct slsi_dev *sdev, struct net_device *dev)
 	slsi_create_packet_filter_element(SLSI_LOCAL_ARP_FILTER_ID, FAPI_PACKETFILTERMODE_OPT_IN,
 					  num_pattern_desc, pattern_desc, &pkt_filter_elem[num_filters], &pkt_filters_len);
 	num_filters++;
-	
+
 	ret = slsi_mlme_set_packet_filter(sdev, dev, pkt_filters_len, num_filters, pkt_filter_elem);
 	if (ret)
 		return ret;
@@ -6898,6 +6871,7 @@ int slsi_read_regulatory_rules(struct slsi_dev *sdev, struct slsi_802_11d_reg_do
 	int i = 0;
 	int country_index = 0;
 	struct ieee80211_reg_rule *reg_rule = NULL;
+	int num_rules = 0;
 
 	if ((sdev->regdb.regdb_state == SLSI_REG_DB_NOT_SET) || (sdev->regdb.regdb_state == SLSI_REG_DB_ERROR)) {
 		SLSI_ERR(sdev, "Regulatory is not set!\n");
@@ -6916,28 +6890,30 @@ int slsi_read_regulatory_rules(struct slsi_dev *sdev, struct slsi_802_11d_reg_do
 	domain_info->regdomain->dfs_region = sdev->regdb.country[country_index].operating_class_set;
 
 	for (i = 0; i < sdev->regdb.country[country_index].collection->reg_rule_num; i++) {
-		reg_rule = &domain_info->regdomain->reg_rules[i];
+		if (sdev->regdb.country[country_index].collection->reg_rule[i]->flags & SLSI_REGULATORY_DUP_RULE)
+			break;
+		reg_rule = &domain_info->regdomain->reg_rules[num_rules++];
 
 		/* start freq 2 bytes */
-		reg_rule->freq_range.start_freq_khz = (sdev->regdb.country[country_index].collection->reg_rule[i]->freq_range->start_freq * 1000);
+		reg_rule->freq_range.start_freq_khz = sdev->regdb.country[country_index].collection->reg_rule[i]->freq_range->start_freq * 1000;
 
 		/* end freq 2 bytes */
-		reg_rule->freq_range.end_freq_khz = (sdev->regdb.country[country_index].collection->reg_rule[i]->freq_range->end_freq * 1000);
+		reg_rule->freq_range.end_freq_khz = sdev->regdb.country[country_index].collection->reg_rule[i]->freq_range->end_freq * 1000;
 
 		/* Max Bandwidth 1 byte */
-		reg_rule->freq_range.max_bandwidth_khz = (sdev->regdb.country[country_index].collection->reg_rule[i]->freq_range->max_bandwidth * 1000);
+		reg_rule->freq_range.max_bandwidth_khz = sdev->regdb.country[country_index].collection->reg_rule[i]->freq_range->max_bandwidth * 1000;
 
 		/* max_antenna_gain is obsolete now. */
 		reg_rule->power_rule.max_antenna_gain = 0;
 
 		/* Max Power 1 byte */
-		reg_rule->power_rule.max_eirp = (sdev->regdb.country[country_index].collection->reg_rule[i]->max_eirp * 100);
+		reg_rule->power_rule.max_eirp = sdev->regdb.country[country_index].collection->reg_rule[i]->max_eirp * 100;
 
 		/* Flags 1 byte */
 		reg_rule->flags = slsi_remap_reg_rule_flags(sdev->regdb.country[country_index].collection->reg_rule[i]->flags);
 	}
 
-	domain_info->regdomain->n_reg_rules = sdev->regdb.country[country_index].collection->reg_rule_num;
+	domain_info->regdomain->n_reg_rules = num_rules;
 
 	return country_index;
 }

@@ -1245,6 +1245,9 @@ static int is_ischain_init_wrap(struct is_device_ischain *device,
 			if (!test_bit(IS_SENSOR_S_INPUT, &sensor->state))
 				continue;
 
+			if (test_bit(IS_SENSOR_SUSPEND, &sensor->state))
+				continue;
+
 			ret = is_sensor_g_module(sensor, &module);
 			if (ret) {
 				merr("is_sensor_g_module is fail(%d)", device, ret);

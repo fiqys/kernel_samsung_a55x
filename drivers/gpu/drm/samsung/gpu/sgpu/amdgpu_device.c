@@ -2684,7 +2684,7 @@ static int amdgpu_device_get_job_timeout_settings(struct amdgpu_device *adev)
 	if (amdgpu_sriov_vf(adev) || amdgpu_passthrough(adev))
 		adev->compute_timeout =  msecs_to_jiffies(60000);
 	else
-		adev->compute_timeout = msecs_to_jiffies(20000);
+		adev->compute_timeout = msecs_to_jiffies(60000);
 
 	if (strnlen(input, AMDGPU_MAX_TIMEOUT_PARAM_LENGTH)) {
 		while ((timeout_setting = strsep(&input, ",")) &&
@@ -3297,7 +3297,7 @@ void amdgpu_device_fini(struct amdgpu_device *adev)
 int amdgpu_device_suspend(struct drm_device *dev, bool fbcon)
 {
 	struct amdgpu_device *adev;
-	int r;
+	int r, need_to_reset;
 
 	trace_amdgpu_device_suspend_start(0);
 	adev = drm_to_adev(dev);
@@ -3329,7 +3329,7 @@ int amdgpu_device_suspend(struct drm_device *dev, bool fbcon)
 	if (adev->gmc.real_vram_size)
 		amdgpu_bo_evict_vram(adev);
 
-	amdgpu_fence_driver_suspend(adev);
+	need_to_reset = amdgpu_fence_driver_suspend(adev);
 
 #ifdef CONFIG_DRM_SGPU_DVFS
 	sgpu_afm_suspend(adev);
@@ -3340,6 +3340,12 @@ int amdgpu_device_suspend(struct drm_device *dev, bool fbcon)
 #endif /* CONFIG_DRM_SGPU_DVFS */
 
 	r = amdgpu_device_ip_suspend_phase2(adev);
+
+	if (need_to_reset) {
+		DRM_INFO("do hard reset, all fences has not been signaled\n");
+		vangogh_lite_gpu_quiesce(adev);
+		amdgpu_do_hard_reset(adev);
+	}
 
 	/* evict remaining vram memory
 	 * This second call to evict vram is to evict the gart page table

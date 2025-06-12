@@ -1218,6 +1218,15 @@ enum aa_adaptive_pixel_mode {
 	AA_ADAPTIVE_PIXEL_MODE_OFF,
 };
 
+enum aa_video_dr_mode {
+	AA_VIDEO_DR_MODE_SDR = 0,
+	AA_VIDEO_DR_MODE_HDR10_PLUS,
+	AA_VIDEO_DR_MODE_3HDR,
+	AA_VIDEO_DR_MODE_HLG10,
+	AA_VIDEO_DR_MODE_HDR10,
+	AA_VIDEO_DR_MODE_LOG10,
+};
+
 struct camera2_video_output_size {
 	uint16_t			width;
 	uint16_t			height;
@@ -1304,7 +1313,8 @@ struct camera2_aa_ctl {
 	uint32_t			vendor_remosaicCropZoomRatio;
 	enum aa_transient_action	vendor_transientAction;
 	enum aa_adaptive_pixel_mode	vendor_adaptivePixelMode;
-	uint32_t			vendor_reserved[6];
+	enum aa_video_dr_mode		vendor_videoDrMode;
+	uint32_t			vendor_reserved[5];
 };
 
 struct aa_apexInfo {
@@ -2154,6 +2164,12 @@ enum camera_scene_optimizer_modes {
 	CAMERA_SCENE_OPTIMIZER_MODE_ON      = 1,
 };
 
+enum camera_fold_state {
+	CAMERA_FOLD_UNFOLDED = 0,
+	CAMERA_FOLD_FOLDED = 6,
+	CAMERA_FOLD_INVALID = 0xFF,
+};
+
 /** \brief
   User-defined control area.
   \remarks
@@ -2217,7 +2233,9 @@ struct camera2_uctl {
 	uint32_t			textDetectionInfo;
 	struct camera2_optical_flow_Info opticalFlowInfo;
 	enum camera_scene_optimizer_modes sceneOptimizerMode;
-	uint32_t			reserved[45];
+	uint32_t			scenarioIdx;
+	enum camera_fold_state foldState;
+	uint32_t			reserved[43];
 };
 
 struct camera2_udm {

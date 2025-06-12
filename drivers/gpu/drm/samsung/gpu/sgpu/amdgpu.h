@@ -206,6 +206,8 @@ extern int sgpu_unscheduled_job_debug;
 extern int sgpu_profiler_user_time;
 extern int sgpu_jobtimeout_to_panic;
 
+extern int sgpu_devfreq_polling_ms;
+
 #define AMDGPU_VM_MAX_NUM_CTX			4096
 #define AMDGPU_SG_THRESHOLD			(256*1024*1024)
 #define AMDGPU_DEFAULT_GTT_SIZE_MB		8192ULL /* 8GB by default */

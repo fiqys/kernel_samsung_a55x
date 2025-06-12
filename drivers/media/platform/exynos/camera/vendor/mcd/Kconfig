@@ -118,6 +118,12 @@ config CAMERA_AAX_V55X
         default n
         help
          This camera is aax_v55x.
+config CAMERA_MMY_V56X
+        bool "This camera is mmy_v56x"
+        depends on CAMERA_VENDOR_MCD
+        default n
+        help
+         This camera is mmy_v56x.
 config USE_OIS_TAMODE_CONTROL
 	bool "Use ois TAMODE control"
         depends on CAMERA_VENDOR_MCD

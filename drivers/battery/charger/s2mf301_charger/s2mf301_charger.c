@@ -53,7 +53,7 @@ static void s2mf301_test_read(struct i2c_client *i2c)
 	char str[1016] = {0,};
 	int i;
 
-	for (i = 0x05; i <= 0x32; i++) {
+	for (i = 0x05; i <= 0x3D; i++) {
 		s2mf301_read_reg(i2c, i, &data);
 		sprintf(str+strlen(str), "0x%02x:0x%02x, ", i, data);
 	}
@@ -473,8 +473,8 @@ static bool s2mf301_chg_init(struct s2mf301_charger_data *charger, struct s2mf30
 	u8 sts;
 	union power_supply_propval value;
 
-	/* Set battery OCP Disable */
-	s2mf301_update_reg(charger->i2c, S2MF301_CHG_CTRL13, 0x00, BAT_OCP_EN_MASK);
+	/* Set battery BAT OCP disable */
+	s2mf301_update_reg(charger->i2c, S2MF301_CHG_TRIM_D2A_LC_OTP_02, 1 << BAT_OCP_ENB_SHIFT, BAT_OCP_ENB_MASK);
 
 	/* Set topoff timer 90m */
 	s2mf301_update_reg(charger->i2c, S2MF301_CHG_CTRL20,
@@ -636,7 +636,10 @@ static int s2mf301_get_charging_health(struct s2mf301_charger_data *charger)
 	if (charger->ovp)
 		return POWER_SUPPLY_HEALTH_OVERVOLTAGE;
 
-	return POWER_SUPPLY_HEALTH_GOOD;
+	if (is_pd_wire_type(charger->cable_type))
+		return POWER_SUPPLY_EXT_HEALTH_UNDERVOLTAGE;
+	else
+		return POWER_SUPPLY_HEALTH_GOOD;
 }
 
 static void s2mf301_release_bypass(struct s2mf301_charger_data *charger)
@@ -1224,6 +1227,51 @@ static int s2mf301_chg_set_property(struct power_supply *psy,
 				psy_do_property("s2mf301-fuelgauge", set, POWER_SUPPLY_EXT_PROP_FGSRC_SWITCHING, value);
 			}
 			break;
+		case POWER_SUPPLY_EXT_PROP_ENABLE_HW_FACTORY_MODE:
+			if (charger->bypass) {
+				pr_info("%s: Skip Factory Mode in bypass mode\n", __func__);
+				break;
+			}
+			pr_info("%s: no vbus + 523K\n", __func__);
+
+			/* forced set buck on /charge off */
+			s2mf301_enable_charger_switch(charger, 0);
+
+			/* ICR MAX */
+			s2mf301_write_reg(charger->i2c, S2MF301_CHG_CTRL2, 0x7F);
+			/* RD_OR_VBUS_MUX_SEL */
+			value.intval = 0;
+			psy_do_property("usbpd-manager", set, POWER_SUPPLY_PROP_ENERGY_NOW, value);
+			/* IN2BAT OFF */
+			s2mf301_update_reg(charger->i2c, S2MF301_CHG_CHG_OPTION0, 0x01, 0x01);
+			msleep(400);
+			/* QBAT OFF DLY ON at factory mode release */
+			s2mf301_update_reg(charger->i2c, S2MF301_CHG_OPEN_OTP0, 0x20, 0x20);
+			/* BAT2SYS OFF at factory mode release */
+			s2mf301_update_reg(charger->i2c, S2MF301_CHG_T_CHG_ON5, 0x0, 0x40);
+			/* QBAT OFF */
+			s2mf301_update_reg(charger->i2c, S2MF301_CHG_T_CHG_ON6, 0x02, 0x02);
+			/* CHIP2SYS OFF */
+			s2mf301_update_reg(charger->i2c, S2MF301_CHG_T_CHG_OFF5, 0x01, 0x01);
+			/* EN_MRST, SET_MRSTBTMR 1.0s */
+			s2mf301_update_reg(charger->top, S2MF301_TOP_MRSTB_RESET, 0x08, 0x0F);
+			/* VIO RESET OFF */
+			s2mf301_update_reg(charger->top, S2MF301_TOP_I2C_RESET_CTRL, 0x0, 0x01);
+			/* SYS Regulation 4.4V(default) */
+			s2mf301_write_reg(charger->i2c, S2MF301_CHG_CTRL8, 0x78);
+			/* EN_FAC_CHG_301k Enable */
+			s2mf301_update_reg(charger->top, S2MF301_TOP_AUTO_FAC_CHG, 0x44, 0x44);
+
+			/* Switching for fuel gauge to get SYS voltage */
+			value.intval = SEC_BAT_FGSRC_SWITCHING_VSYS;
+			psy_do_property("s2mf301-fuelgauge", set, POWER_SUPPLY_EXT_PROP_FGSRC_SWITCHING, value);
+
+			/* Switching for Flash LED to TA mode */
+			value.intval = 1;
+			psy_do_property("s2mf301-fled", set, POWER_SUPPLY_PROP_ENERGY_NOW, value);
+
+			factory_mode = 1;
+			break;
 		case POWER_SUPPLY_EXT_PROP_CHARGE_OTG_CONTROL:
 			s2mf301_charger_otg_control(charger, val->intval);
 			break;
@@ -1275,6 +1323,24 @@ static int s2mf301_chg_set_property(struct power_supply *psy,
 			switch (lsi_psp) {
 			case POWER_SUPPLY_LSI_PROP_ICHGIN:
 				s2mf301_check_multi_tap_off(charger);
+				break;
+			case POWER_SUPPLY_LSI_PROP_PD_SUPPORT:
+				{
+					/*
+					 * disable Current SoftDown for PD Cert. (PS.SNK.01 / PS.SRC.03)
+					 * 0xF3[3:0] = 0000 : Disable Current SoftDown (only 0A SourceCap)
+					 * 0xF3[3:0] = 0101 : Enable Current SoftDown (Default)
+					 */
+					u8 reg1;
+
+					if (val->intval == 1)
+						s2mf301_update_reg(charger->i2c, 0xF3, 0x00, 0x0F);
+					else
+						s2mf301_update_reg(charger->i2c, 0xF3, 0x05, 0x0F);
+
+					s2mf301_read_reg(charger->i2c, 0xF3, &reg1);
+					pr_info("%s, 0xF3(0x%x)\n", __func__, reg1);
+				}
 				break;
 			default:
 				return -EINVAL;
@@ -2057,19 +2123,19 @@ static void s2mf301_charger_shutdown(struct platform_device *dev)
 	{
 		u8 auto_shipmode_level;
 
-		if ((charger->cable_type != POWER_SUPPLY_TYPE_BATTERY &&
-				charger->cable_type != POWER_SUPPLY_TYPE_UNKNOWN) || lpcharge)
+		/* case with stray voltage due to TA connection */
+		if (!is_nocharge_type(charger->cable_type) || lpcharge) {
 			if (s2mf301_check_current_level())
 				auto_shipmode_level = s2mf301_check_auto_shipmode_level(charger, 2);
 			else
 				auto_shipmode_level = s2mf301_check_auto_shipmode_level(charger, 1);
-		else
+		} else
 			auto_shipmode_level = s2mf301_check_auto_shipmode_level(charger, 0);
 
 		s2mf301_set_auto_shipmode_level(charger, auto_shipmode_level);
 	}
 #endif
-	s2mf301_set_time_bat2ship_db(charger, 192);
+	s2mf301_set_time_bat2ship_db(charger, 0);
 	s2mf301_set_auto_shipmode(charger, true);
 
 	pr_info("%s: S2MF301 Charger driver shutdown\n", __func__);

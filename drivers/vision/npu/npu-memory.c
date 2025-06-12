@@ -648,6 +648,7 @@ void npu_memory_unmap(struct npu_memory *memory, struct npu_memory_buffer *buffe
 	}
 
 	buffer->attachment = NULL;
+	buffer->dma_buf = NULL;
 	buffer->sgt = NULL;
 	buffer->daddr = 0;
 	buffer->vaddr = NULL;

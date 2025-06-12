@@ -88,6 +88,13 @@ config CAMERA_CIS_3L6_OBJ
 		help
 		  Use to build 3L6 camera sensor.
 
+config CAMERA_CIS_3LC_OBJ
+		tristate "Use 3LC camera cis"
+	depends on CAMERA_CIS_SELECT
+		default n
+		help
+		  Use to build 3LC camera sensor.
+
 config CAMERA_CIS_3H1_OBJ
 		tristate "Use 3H1 camera cis"
 	depends on CAMERA_CIS_SELECT
@@ -270,12 +277,26 @@ config CAMERA_CIS_IMX906_OBJ
 		help
 		  Use to build IMX906 camera sensor.
 
+config CAMERA_CIS_IMX906_HDR_OBJ
+		tristate "Use IMX906_HDR camera cis"
+	depends on CAMERA_CIS_SELECT
+		default n
+		help
+		  Use to build IMX906_HDR camera sensor.
+
 config CAMERA_CIS_GC05A3_OBJ
 		tristate "Use GC05A3 camera cis"
 	depends on CAMERA_CIS_SELECT
 		default n
 		help
 		  Use to build GC05A3 camera sensor.
+
+config CAMERA_CIS_GC08A3_OBJ
+		tristate "Use GC08A3 camera cis"
+	depends on CAMERA_CIS_SELECT
+		default n
+		help
+		  Use to build GC08A3 camera sensor.
 
 config CAMERA_CIS_HM1_OBJ
 		tristate "Use HM1 camera cis"

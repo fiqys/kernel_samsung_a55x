@@ -253,7 +253,10 @@ static void scsc_bt_fw_log_update_filter(u8 trigger, u32 bt1_high, u32 bt1_low, 
 	}
 #endif
 
-	if (bt_svc->bsmhcp_protocol->header.btlog_enables0_low == 0) {
+	if (bt_svc->fw_log.btlog_enables0_low == 0 &&
+	    bt_svc->fw_log.btlog_enables0_high == 0 &&
+	    bt_svc->fw_log.btlog_enables1_low == 0 &&
+	    bt_svc->fw_log.btlog_enables1_high == 0) {
 		mutex_lock(&fw_log_filter);
 		if (bt_svc->service) {
 			bt_svc->bsmhcp_protocol->header.btlog_enables0_low = bt0_low;
@@ -1460,10 +1463,7 @@ static ssize_t scsc_bt_shm_h4_read_continue(char __user *buf, size_t len)
 
 		if (bt_svc->read_operation == BT_READ_OP_NONE) {
 			/* All done - reset the read interrupt to read the new FW log */
-			if (bt_svc->fw_log.fw_acl_read_state & FW_READ_VSC)
-				bt_svc->fw_log.fw_acl_read_state &= (FW_READ_ENABLE | FW_READ_VSC);
-			else
-				bt_svc->fw_log.fw_acl_read_state &= FW_READ_ENABLE;
+			bt_svc->fw_log.fw_acl_read_state &= FW_READ_ENABLE;
 		}
 		/* Is a HCI event read operation ongoing */
 	} else if (bt_svc->read_operation == BT_READ_OP_HCI_EVT) {
@@ -2112,7 +2112,6 @@ static ssize_t scsc_bt_circ_h4_read_fw_log_data(char __user *buf, size_t len)
 		 * HCI_VSC_COMPLETE_FW_LOG_BTSNOOP_LEN data regardless of the available amount of user memory
 		 */
 		if (bt_svc->fw_log.fw_acl_read_state & FW_READ_VSC) {
-			bt_svc->fw_log.fw_acl_read_state &= ~FW_READ_VSC;
 			h4_read_data_header_len = H4DMUX_HEADER_EVT;
 			h4_read_data_header[H4_HEADER_INDEX] = HCI_EVENT_PKT;
 			h4_read_data_header[1] = HCI_EVENT_COMMAND_COMPLETE;

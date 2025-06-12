@@ -728,6 +728,15 @@ static void __mfc_handle_released_buf(struct mfc_core *core, struct mfc_ctx *ctx
 				dec->refcnt++;
 				mfc_ctx_debug(3, "[REFINFO] Dqueued DPB[%d] released fd: %d\n",
 						i, dec->dpb[i].fd[0]);
+
+				if (dec->dpb[i].new_fd != -1) {
+					dec->ref_buf[dec->refcnt].fd[0] = dec->dpb[i].new_fd;
+					dec->refcnt++;
+					mfc_ctx_debug(3, "[REFINFO] Dqueued DPB[%d] released fd: %d\n",
+							i, dec->dpb[i].new_fd);
+					dec->dpb[i].new_fd = -1;
+				}
+
 				/*
 				 * Except queued buffer,
 				 * the released DPB is deleted from dpb_table
@@ -2143,7 +2152,7 @@ static inline int __mfc_nal_q_irq(struct mfc_core *core,
 
 		mfc_core_clear_int();
 
-		if (!nal_q_handle->nal_q_exception)
+		if (!nal_q_handle->nal_q_exception && nal_q_handle->nal_q_state != NAL_Q_STATE_STOPPED)
 			mfc_core_nal_q_clock_off(core, nal_q_handle);
 
 		if (ctx_num < 0) {

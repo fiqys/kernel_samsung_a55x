@@ -21,12 +21,7 @@ enum is_hw_ois_mcu_reg_name {
 	OIS_CPU_STATUS,
 	OIS_CPU_STATES,
 	OIS_CPU_OPTION,
-#ifdef CONFIG_CAMERA_AAX_V55X
 	OIS_CPU_REG_MAX = OIS_CPU_OPTION,
-#else
-	OIS_CPU_OUT,
-	OIS_CPU_REG_MAX = OIS_CPU_OUT,
-#endif
 
 	/* CoretexM0+ */
 	OIS_CM0P_BOOT,
@@ -880,18 +875,11 @@ enum is_hw_ois_mcu_reg_name {
 
 static const struct is_reg ois_mcu_regs[OIS_REG_MAX + 1] = {
 	/* PMU */
-#ifdef CONFIG_CAMERA_AAX_V55X
 	{0x36c0, "OIS_CPU_CONFIGURATION"},
 	{0x36c4, "OIS_CPU_STATUS"},
 	{0x36c8, "OIS_CPU_STATES"},
 	{0x36cc, "OIS_CPU_OPTION"},
-#else
-	{0x3780, "OIS_CPU_CONFIGURATION"},
-	{0x3784, "OIS_CPU_STATUS"},
-	{0x3788, "OIS_CPU_STATES"},
-	{0x378c, "OIS_CPU_OPTION"},
-	{0x37a0, "OIS_CPU_OUT"},
-#endif
+
 	/* CoretexM0+ */
 	{0x0000, "OIS_CM0P_BOOT"},
 	{0x0004, "OIS_CM0P_IRQ"},
@@ -911,17 +899,10 @@ static const struct is_reg ois_mcu_regs[OIS_REG_MAX + 1] = {
 	{0x0060, "OIS_PERI_FS1"},
 	{0x0064, "OIS_PERI_FS2"},
 	{0x0068, "OIS_PERI_FS3"},
-#ifdef CONFIG_CAMERA_AAX_V55X
 	{0x0020, "OIS_PERI_CON_CTRL"},
 	{0x0028, "OIS_PERI_PUD_CTRL"},
 	{0x0040, "OIS_PERI2_CON_CTRL"},
 	{0x0048, "OIS_PERI2_PUD_CTRL"},
-#else
-	{0x0100, "OIS_PERI_CON_CTRL"},
-	{0x0108, "OIS_PERI_PUD_CTRL"},
-	{0x0120, "OIS_PERI2_CON_CTRL"},
-	{0x0128, "OIS_PERI2_PUD_CTRL"},
-#endif
 	{0x00c4, "OIS_PERI_USI_CON"},
 	{0x00c8, "OIS_PERI_USI_CON_CLEAR"},
 	{0x0160, "OIS_PERI_I3C_CON_CTRL"},
@@ -1751,9 +1732,6 @@ static const struct is_reg pmu_ois_mcu_masks[OIS_CPU_REG_MAX + 1] = {
 	{0x1, "STATUS"},
 	{0xFF, "STATES"},
 	{0x1F, "OIS_CPU_OPTION"},
-#ifndef CONFIG_CAMERA_AAX_V55X	
-	{0x1, "OIS_CPU_OUT"},
-#endif
 };
 
 enum is_hw_ois_mcu_cmd_field {

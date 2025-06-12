@@ -50,7 +50,7 @@ static void test_slsi_freq_to_band(struct kunit *test)
 	freq = SLSI_5GHZ_MIN_FREQ;
 	KUNIT_EXPECT_EQ(test, SLSI_FREQ_BAND_5GHZ, slsi_freq_to_band(freq));
 
-	freq = 5830;
+	freq = SLSI_5GHZ_MAX_FREQ + 5;
 	KUNIT_EXPECT_EQ(test, SLSI_FREQ_BAND_6GHZ, slsi_freq_to_band(freq));
 }
 

@@ -243,6 +243,7 @@ void is_vendor_resource_put(struct is_vendor *vendor, u32 rsc_type);
 #if defined(CONFIG_CAMERA_USE_INTERNAL_MCU)
 void is_vendor_mcu_power_on(bool use_shared_rsc);
 void is_vendor_mcu_power_off(bool use_shared_rsc);
+void is_vendor_mcu_power_on_wait(void);
 #endif
 long is_vendor_read_efs(char *efs_path, u8 *buf, int buflen);
 int is_vendor_get_module_from_position(int position, struct is_module_enum **module);

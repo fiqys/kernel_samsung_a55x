@@ -87,7 +87,7 @@ static int bp_table_cnt = 5;
 module_param_array(bp_table, int, &bp_table_cnt, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(bp_table, "bp resource table configuration");
 
-static int bp_log = LOG_FILTER_TX_FAILURE | LOG_FILTER_SHOW_COD;
+static int bp_log = LOG_FILTER_TX_FAILURE | LOG_FILTER_SHOW_COD | LOG_FILTER_Q_STATUS;
 module_param(bp_log, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(bp_log, "bp log");
 
@@ -98,6 +98,10 @@ MODULE_PARM_DESC(bp_fixed_cpu, "bp use dedicated cpu for napi");
 static int bp_q_wake = 2;
 module_param(bp_q_wake, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(bp_q_wake, "bp queue wake denominator");
+
+static int bp_tx_wakelock_tm_ms = 300;
+module_param(bp_tx_wakelock_tm_ms, int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(bp_tx_wakelock_tm_ms, "wakelock timeout if tx napi is scheduled in txbp resume");
 
 /**
  * Resource allocation strategy.
@@ -173,6 +177,8 @@ struct max_weight_element {
 	int weight;
 };
 
+static __always_inline void slsi_txbp_schedule_napi(struct net_device *dev, struct tx_netdev_data *tx_priv);
+
 #if defined(CONFIG_SCSC_PCIE_CHIP)
 void slsi_tx_stop_all_queues(struct net_device *dev)
 {
@@ -236,8 +242,12 @@ void slsi_txbp_suspend(struct slsi_dev *sdev)
 
 void slsi_txbp_resume(struct slsi_dev *sdev)
 {
-#ifndef CONFIG_SCSC_WLAN_LOAD_BALANCE_MANAGER
 	struct tx_netdev_data *tx_priv;
+	int q_len;
+	struct tx_struct *tx;
+	u8 qidx;
+	bool is_tx_napi_scheduled = false;
+#ifndef CONFIG_SCSC_WLAN_LOAD_BALANCE_MANAGER
 	struct tx_struct *tx_info;
 	struct netdev_vif *ndev_vif;
 
@@ -252,6 +262,20 @@ void slsi_txbp_resume(struct slsi_dev *sdev)
 	SLSI_MUTEX_LOCK(sdev->start_stop_mutex);
 	slsi_lbm_enable_tx_napi();
 #endif
+        list_for_each_entry(tx_priv, &txbp_priv.vif_list, list) {
+		q_len = 0;
+		tx = &tx_priv->tx;
+		for (qidx = 0; qidx < SLSI_TX_DATA_QUEUE_NUM; qidx++)
+			q_len += READ_ONCE(tx->assigned_q[qidx]->qlen);
+		if (q_len) {
+			slsi_txbp_schedule_napi(tx->ndev, tx_priv);
+			is_tx_napi_scheduled = true;
+		}
+        }
+	if (is_tx_napi_scheduled) {
+		slsi_wake_lock_timeout(&tx->sdev->wlan_wl_tx_sched, msecs_to_jiffies(bp_tx_wakelock_tm_ms));
+		SLSI_INFO(tx->sdev, "tx_napi scheduled. wakelock tm:%dms\n", bp_tx_wakelock_tm_ms);
+	}
 	SLSI_MUTEX_UNLOCK(sdev->start_stop_mutex);
 	return;
 }
@@ -281,11 +305,20 @@ void slsi_tx_timeout(struct net_device *dev)
 
 static void show_cod(struct tx_netdev_data *tx_priv)
 {
-	if (bp_log & LOG_FILTER_SHOW_COD) {
-		SLSI_NET_DBG3(tx_priv->tx.ndev, SLSI_TX, "BP: G-COD: %u NETDEV-COD: %u AC-COD: [BE:%u BK:%u VI:%u VO:%u]\n",
+	static DEFINE_RATELIMIT_STATE(_rs, (1 * HZ), 3);
+	if (__ratelimit(&_rs)) {
+		SLSI_NET_INFO(tx_priv->tx.ndev, "BP: G-COD: %u NETDEV-COD: %u AC-COD: [BE:%u BK:%u VI:%u VO:%u]\n",
 			      txbp_priv.cod, tx_priv->netdev_cod, tx_priv->ac_cod[SLSI_TRAFFIC_Q_BE],
 			      tx_priv->ac_cod[SLSI_TRAFFIC_Q_BK], tx_priv->ac_cod[SLSI_TRAFFIC_Q_VI],
 			      tx_priv->ac_cod[SLSI_TRAFFIC_Q_VO]);
+	} else {
+		if (bp_log & LOG_FILTER_SHOW_COD) {
+			SLSI_NET_DBG3(tx_priv->tx.ndev, SLSI_TX,
+				      "BP: G-COD: %u NETDEV-COD: %u AC-COD: [BE:%u BK:%u VI:%u VO:%u]\n",
+				      txbp_priv.cod, tx_priv->netdev_cod, tx_priv->ac_cod[SLSI_TRAFFIC_Q_BE],
+				      tx_priv->ac_cod[SLSI_TRAFFIC_Q_BK], tx_priv->ac_cod[SLSI_TRAFFIC_Q_VI],
+				      tx_priv->ac_cod[SLSI_TRAFFIC_Q_VO]);
+		}
 	}
 }
 
@@ -813,12 +846,26 @@ static int slsi_txbp_napi(struct napi_struct *napi, int budget)
 		}
 	}
 tx_done_check_q:
-	for (ac = SLSI_TRAFFIC_Q_VO; ac > -1; ac--)
+	for (ac = SLSI_TRAFFIC_Q_VO; ac > -1; ac--) {
 #ifdef CONFIG_SCSC_WLAN_SAP_POWER_SAVE
 		slsi_txbp_check_q_status(tx->ndev, tx_priv, ac, ndev_vif->softap_suspend_mode);
+		if (work_done < budget && __netif_subqueue_stopped(tx->ndev, ac) && !ndev_vif->softap_suspend_mode) {
 #else
 		slsi_txbp_check_q_status(tx->ndev, tx_priv, ac);
+		if (work_done < budget && __netif_subqueue_stopped(tx->ndev, ac)) {
 #endif
+			if (slsi_txbp_has_resource(tx_priv)) {
+				/*
+				* we repoll Tx napi if there is single queue in paused state.
+				*/
+				work_done = budget;
+			} else {
+				SLSI_NET_ERR(tx->ndev, "BP: one of the netif subqueues is stopped but no resource!\n");
+				show_cod(tx_priv);
+			}
+		}
+	}
+
 tx_done:
 	if (work_done)
 		slsi_hip_from_host_intr_set(sdev->service, &sdev->hip);
@@ -1019,6 +1066,8 @@ __always_inline bool slsi_vif_deactivated_post(struct slsi_dev *sdev, struct net
 
 	write_lock_bh(&txbp_priv.vif_lock);
 	ndev_vif->tx_netdev_data = NULL;
+	if (tx_priv->netdev_cod)
+		SLSI_NET_INFO(dev, "BP: g-cod:%d, netdev-cod:%d\n", txbp_priv.cod, tx_priv->netdev_cod);
 	txbp_priv.vif_cnt--;
 	list_del(&tx_priv->list);
 	slsi_txbp_vif_budget_redistribute(dev, false);
@@ -1429,7 +1478,6 @@ static __always_inline void slsi_txbp_schedule_napi(struct net_device *dev, stru
 	if (!slsi_txbp_has_resource(tx_priv))
 		return;
 
-
 #ifdef CONFIG_SCSC_WLAN_LOAD_BALANCE_MANAGER
 	if (!test_and_set_bit(SLSI_TX_LBM_RUNNING, &tx_info->lbm_bh_state))
 		slsi_lbm_run_bh(tx_priv->bh_tx);
@@ -1522,6 +1570,7 @@ static __always_inline void slsi_txbp_enqueue(struct net_device *dev, struct net
 			stat->cumulated_wake = ktime_add(wake, stat->cumulated_wake);
 			stat->stop = now;
 			netif_stop_subqueue(dev, queue_mapping);
+			show_cod(tx_priv);
 		}
 
 		cpu = smp_processor_id();
@@ -1848,11 +1897,11 @@ int slsi_tx_done(struct slsi_dev *sdev, u32 colour, bool more)
 
 	rcu_read_lock();
 	read_lock(&txbp_priv.vif_lock);
+	write_lock(&txbp_priv.cod_lock);
+	txbp_priv.cod--;
 	if (!colour && !more) {
-		write_lock(&txbp_priv.cod_lock);
 		list_for_each_entry(tx_priv, &txbp_priv.vif_list, list) {
 			for (ac = 0 ; ac < AC_CATEGORIES ; ac++) {
-				txbp_priv.cod -= tx_priv->ac_completed[ac];
 				tx_priv->netdev_cod -= tx_priv->ac_completed[ac];
 				tx_priv->ac_cod[ac] -= tx_priv->ac_completed[ac];
 				tx_priv->ac_completed[ac] = 0;
@@ -1876,23 +1925,24 @@ int slsi_tx_done(struct slsi_dev *sdev, u32 colour, bool more)
 		ndev_vif = netdev_priv(dev);
 		tx_priv = (struct tx_netdev_data *)ndev_vif->tx_netdev_data;
 		if (!tx_priv) {
-			SLSI_NET_WARN(dev, "tx_priv Null\n");
+			SLSI_NET_WARN(dev, "tx_priv Null. vif:%d\n", vif);
+			write_unlock(&txbp_priv.cod_lock);
 			read_unlock(&txbp_priv.vif_lock);
 			rcu_read_unlock();
 			return 0;
 		}
 		tx_priv->ac_completed[ac]++;
 	} else {
+		SLSI_ERR(sdev, "Invalid Dev vif:%d\n", vif);
+		write_unlock(&txbp_priv.cod_lock);
 		read_unlock(&txbp_priv.vif_lock);
 		rcu_read_unlock();
 		return -ENODEV;
 	}
 
 	if (!more) {
-		write_lock(&txbp_priv.cod_lock);
 		list_for_each_entry(tx_priv, &txbp_priv.vif_list, list) {
 			for (ac = 0 ; ac < AC_CATEGORIES ; ac++) {
-				txbp_priv.cod -= tx_priv->ac_completed[ac];
 				tx_priv->netdev_cod -= tx_priv->ac_completed[ac];
 				tx_priv->ac_cod[ac] -= tx_priv->ac_completed[ac];
 				tx_priv->ac_completed[ac] = 0;
@@ -1903,6 +1953,8 @@ int slsi_tx_done(struct slsi_dev *sdev, u32 colour, bool more)
 			show_cod(tx_priv);
 			slsi_txbp_schedule_napi(tx_priv->tx.ndev, tx_priv);
 		}
+	} else {
+		write_unlock(&txbp_priv.cod_lock);
 	}
 	read_unlock(&txbp_priv.vif_lock);
 	rcu_read_unlock();

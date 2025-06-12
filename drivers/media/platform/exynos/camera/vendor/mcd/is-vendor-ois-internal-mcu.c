@@ -2079,6 +2079,25 @@ static const struct v4l2_subdev_ops subdev_ops = {
 	.core = &core_ops,
 };
 
+void ois_mcu_power_on_work(struct work_struct *data)
+{
+	struct ois_mcu_dev *mcu = NULL;
+
+	FIMC_BUG_VOID(!data);
+
+	mcu = container_of(data, struct ois_mcu_dev, mcu_power_on_work);
+
+	if (mcu == NULL) {
+		err_mcu("%s ois_mcu_dev NULL! power on failed", __func__);
+		return;
+	}
+	is_vendor_ois_power_ctrl(mcu, 0x1);
+	is_vendor_ois_load_binary(mcu);
+	is_vendor_ois_core_ctrl(mcu, 0x1);
+
+	info_mcu("%s: mcu on.\n", __func__);
+}
+
 static int is_vendor_ois_probe(struct platform_device *pdev)
 {
 	struct is_core *core;
@@ -2306,6 +2325,7 @@ static int is_vendor_ois_probe(struct platform_device *pdev)
 	core->mcu = mcu;
 	atomic_set(&mcu->shared_rsc_count, 0);
 	mutex_init(&mcu->power_mutex);
+	INIT_WORK(&mcu->mcu_power_on_work, ois_mcu_power_on_work);
 
 	vendor_priv = core->vendor.private_data;
 	vendor_priv->ois_ver_read = false;

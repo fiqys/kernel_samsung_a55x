@@ -1021,7 +1021,7 @@ void mfc_dec_defer_update(struct mfc_core_ctx *core_ctx)
 
 	num_inst = core->dev->num_inst;
 	if ((num_inst == 1) && IS_SINGLE_MODE(ctx) && !ctx->boosting_time &&
-		(core_ctx->state == MFCINST_RUNNING) &&
+		(core_ctx->state == MFCINST_RUNNING) && !ctx->dec_batch_disable &&
 		(ctx->idle_mode == MFC_IDLE_MODE_NONE) &&
 		(dec->defer_frame_cnt > MFC_INITIAL_SKIP_FRAME) &&
 		UNDER_8K_RES(ctx) &&

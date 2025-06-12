@@ -123,15 +123,8 @@ int __is_mcu_hw_enable(enum ois_mcu_base_reg_index base)
 	is_mcu_hw_set_field(base, OIS_CM0P_CTRL0, F_OIS_CM0P_IPCLKREQ_ENABLE, 1);
 	usleep_range(1000, 1100); //quadra_bringup
 
-#ifdef CONFIG_CAMERA_AAX_V55X
 	is_mcu_hw_set_field(base, OIS_CM0P_REMAP_I2C_ADDR, F_OIS_CM0P_I2C_ADDR, 0x13920000);
 	is_mcu_hw_set_field(base, OIS_CM0P_REMAP_SPI_ADDR, F_OIS_CM0P_SPI_ADDR, 0x13910000);
-#else
-	is_mcu_hw_set_field(base, OIS_CM4_REMAP_SPARE_ADDR, F_OIS_CM0P_SPDMA_ADDR, 0x119B0000);
-	is_mcu_hw_set_field(base, OIS_CM4_REMAP_I3C_ADDR, F_OIS_CM0P_I2C_ADDR, 0x119C0000);
-	is_mcu_hw_set_field(base, OIS_CM0P_REMAP_I2C_ADDR, F_OIS_CM0P_I2C_ADDR, 0x119D0000);
-	is_mcu_hw_set_field(base, OIS_CM0P_REMAP_SPI_ADDR, F_OIS_CM0P_SPI_ADDR, 0x119E0000);
-#endif
 
 	info_mcu("%s end", __func__);
 
@@ -155,7 +148,6 @@ int __is_mcu_hw_set_init_peri(enum ois_mcu_base_reg_index base)
 	u32 recover_val = 0;
 	u32 src = 0;
 
-#ifdef CONFIG_CAMERA_AAX_V55X
 	/* GPP1 */
 	src = is_mcu_get_reg_u32(base, OIS_PERI_CON_CTRL);
 	recover_val = src & 0x0000FFFF;	/* 4~7 bit mask */
@@ -177,34 +169,6 @@ int __is_mcu_hw_set_init_peri(enum ois_mcu_base_reg_index base)
 	recover_val = src & 0xFFFFFF00;
 	recover_val |= 0x00000055;
 	is_mcu_set_reg_u32(base, OIS_PERI2_PUD_CTRL, recover_val);
-#else
-	recover_val = 0x00001122;
-	is_mcu_set_reg_u32(base, OIS_PERI_CON_CTRL, recover_val);
-	src = is_mcu_get_reg_u32(base, OIS_PERI_PUD_CTRL);
-
-	recover_val = src & 0xFFFFFF00;
-	is_mcu_set_reg_u32(base, OIS_PERI_PUD_CTRL, recover_val);
-
-	recover_val = 0x00002222;
-	is_mcu_set_reg_u32(base, OIS_PERI2_CON_CTRL, recover_val);
-
-	src = is_mcu_get_reg_u32(base, OIS_PERI2_PUD_CTRL);
-	recover_val = src & 0xFFFF0000;
-	is_mcu_set_reg_u32(base, OIS_PERI2_PUD_CTRL, recover_val);
-
-	/* I3C */
-	recover_val = 0x00000022;
-	is_mcu_set_reg_u32(base, OIS_PERI_I3C_CON_CTRL, recover_val);
-
-	src = is_mcu_get_reg_u32(base, OIS_PERI_I3C_PUD_CTRL);
-	recover_val = src & 0xFFFFFF00;
-	is_mcu_set_reg_u32(base, OIS_PERI_I3C_PUD_CTRL, recover_val);
-
-	src = is_mcu_get_reg_u32(base, OIS_PERI_I3C_DRV_CTRL);
-	recover_val = src & 0xFFFFFF00;
-	recover_val |= 0x00000044;
-	is_mcu_set_reg_u32(base, OIS_PERI_I3C_DRV_CTRL, recover_val);
-#endif
 
 	return ret;
 }
@@ -215,7 +179,6 @@ int __is_mcu_hw_set_clear_peri(enum ois_mcu_base_reg_index base)
 	u32 recover_val = 0;
 	u32 src = 0;
 
-#ifdef CONFIG_CAMERA_AAX_V55X
 	/* GPP1 */
 	src = is_mcu_get_reg_u32(base, OIS_PERI_CON_CTRL);
 	recover_val = src & 0x0000FFFF;	/* 4~7 bit mask */
@@ -237,24 +200,6 @@ int __is_mcu_hw_set_clear_peri(enum ois_mcu_base_reg_index base)
 	recover_val |= 0x00000011;
 
 	is_mcu_set_reg_u32(base, OIS_PERI2_PUD_CTRL, recover_val);
-#else
-	recover_val = 0x00000000;
-	is_mcu_set_reg_u32(base, OIS_PERI_CON_CTRL, recover_val);
-
-	src = is_mcu_get_reg_u32(base, OIS_PERI_PUD_CTRL);
-
-	recover_val = src & 0xFFFFFF00;
-	is_mcu_set_reg_u32(base, OIS_PERI_PUD_CTRL, recover_val);
-
-	recover_val = 0x00000000;
-	is_mcu_set_reg_u32(base, OIS_PERI2_CON_CTRL, recover_val);
-
-	/* spi value ==> MISO, CS : NP, MOSI, CLK : PD */
-	src = is_mcu_get_reg_u32(base, OIS_PERI2_PUD_CTRL);
-	recover_val = src & 0xFFFF0000;
-	recover_val |= 0x00000011;
-	is_mcu_set_reg_u32(base, OIS_PERI2_PUD_CTRL, recover_val);
-#endif
 
 	return ret;
 }
@@ -291,16 +236,8 @@ int __is_mcu_hw_disable(enum ois_mcu_base_reg_index base)
 
 	is_mcu_hw_set_field(base, OIS_CM0P_CTRL0, F_OIS_CM0P_IPCLKREQ_ON, 0);
 	is_mcu_hw_set_field(base, OIS_CM0P_CTRL0, F_OIS_CM0P_IPCLKREQ_ENABLE, 0);
-
-#ifdef CONFIG_CAMERA_AAX_V55X
 	is_mcu_hw_set_field(base, OIS_CM0P_REMAP_I2C_ADDR, F_OIS_CM0P_I2C_ADDR, 0x0);
 	is_mcu_hw_set_field(base, OIS_CM0P_REMAP_SPI_ADDR, F_OIS_CM0P_SPI_ADDR, 0x0);
-#else
-	is_mcu_hw_set_field(base, OIS_CM4_REMAP_SPARE_ADDR, F_OIS_CM0P_SPDMA_ADDR, 0);
-	is_mcu_hw_set_field(base, OIS_CM4_REMAP_I3C_ADDR, F_OIS_CM0P_SPDMA_ADDR, 0);
-	is_mcu_hw_set_field(base, OIS_CM0P_REMAP_I2C_ADDR, F_OIS_CM0P_I2C_ADDR, 0x0);
-	is_mcu_hw_set_field(base, OIS_CM0P_REMAP_SPI_ADDR, F_OIS_CM0P_SPI_ADDR, 0x0);
-#endif
 
 	usleep_range(1000, 1100);
 

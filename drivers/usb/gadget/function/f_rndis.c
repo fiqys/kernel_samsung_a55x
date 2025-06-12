@@ -302,7 +302,7 @@ static struct usb_ss_ep_comp_descriptor ss_intr_comp_desc = {
 	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
 
 	/* the following 3 values can be tweaked if necessary */
-	/* .bMaxBurst =		0, */
+	.bMaxBurst =		15,
 	/* .bmAttributes =	0, */
 	.wBytesPerInterval =	cpu_to_le16(STATUS_BYTECOUNT),
 };
@@ -330,7 +330,7 @@ static struct usb_ss_ep_comp_descriptor ss_bulk_comp_desc = {
 	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
 
 	/* the following 2 values can be tweaked if necessary */
-	/* .bMaxBurst =		0, */
+	.bMaxBurst =		15,
 	/* .bmAttributes =	0, */
 };
 

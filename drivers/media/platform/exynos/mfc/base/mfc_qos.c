@@ -11,6 +11,7 @@
  */
 
 #include <linux/err.h>
+#include <soc/samsung/freq-qos-tracer.h>
 
 #include "mfc_qos.h"
 #include "mfc_utils.h"
@@ -186,11 +187,45 @@ enum {
 	MFC_PERF_BOOST_CPU	= (1 << 2),
 };
 
-void mfc_qos_perf_boost_enable(struct mfc_core *core)
+void __mfc_qos_cpu_boost_enable(struct mfc_core *core)
+{
+	struct mfc_core_platdata *pdata = core->core_pdata;
+	struct mfc_qos_boost *qos_boost_table = pdata->qos_boost_table;
+	struct cpufreq_policy *policy;
+	int i;
+
+	for (i = 0; i < qos_boost_table->num_cluster; i++) {
+		policy = cpufreq_cpu_get(qos_boost_table->num_cpu[i]);
+		if (policy) {
+			freq_qos_tracer_add_request(&policy->constraints,
+				&core->qos_req_cluster[i], FREQ_QOS_MIN,
+				qos_boost_table->freq_cluster[i]);
+			mfc_core_debug(2, "[QoS][BOOST] CPU cluster[%d]: %d\n",
+				i, qos_boost_table->freq_cluster[i]);
+		}
+	}
+
+	core->cpu_boost_enable = 1;
+}
+
+void __mfc_qos_cpu_boost_disable(struct mfc_core *core)
 {
 	struct mfc_core_platdata *pdata = core->core_pdata;
 	struct mfc_qos_boost *qos_boost_table = pdata->qos_boost_table;
 	int i;
+
+	for (i = 0; i < qos_boost_table->num_cluster; i++) {
+		freq_qos_tracer_remove_request(&core->qos_req_cluster[i]);
+		mfc_core_debug(2, "[QoS][BOOST] CPU cluster[%d] off\n", i);
+	}
+
+	core->cpu_boost_enable = 0;
+}
+
+void mfc_qos_perf_boost_enable(struct mfc_core *core)
+{
+	struct mfc_core_platdata *pdata = core->core_pdata;
+	struct mfc_qos_boost *qos_boost_table = pdata->qos_boost_table;
 
 	if (core->dev->debugfs.perf_boost_mode & MFC_PERF_BOOST_DVFS) {
 		core->last_mfc_freq = qos_boost_table->freq_mfc;
@@ -201,7 +236,7 @@ void mfc_qos_perf_boost_enable(struct mfc_core *core)
 				qos_boost_table->freq_int);
 		exynos_pm_qos_add_request(&core->qos_req_mif, PM_QOS_BUS_THROUGHPUT,
 				qos_boost_table->freq_mif);
-		mfc_core_debug(3, "[QoS][BOOST] DVFS mfc: %d, int:%d, mif:%d\n",
+		mfc_core_debug(2, "[QoS][BOOST] DVFS mfc: %d, int:%d, mif:%d\n",
 				qos_boost_table->freq_mfc, qos_boost_table->freq_int,
 				qos_boost_table->freq_mif);
 	}
@@ -211,30 +246,23 @@ void mfc_qos_perf_boost_enable(struct mfc_core *core)
 		if (pdata->mo_control) {
 #ifdef CONFIG_MFC_NO_RENEWAL_BTS
 			bts_update_scen(BS_MFC_UHD_10BIT, 1);
-			mfc_core_debug(3, "[QoS][BOOST] BTS(MO): UHD_10BIT\n");
+			mfc_core_debug(2, "[QoS][BOOST] BTS(MO): UHD_10BIT\n");
 #else
 			__mfc_bts_add_scenario(core, qos_boost_table->bts_scen_idx);
-			mfc_core_debug(3, "[QoS][BOOST] BTS(MO) add idx %d (%s)\n",
+			mfc_core_debug(2, "[QoS][BOOST] BTS(MO) add idx %d (%s)\n",
 					qos_boost_table->bts_scen_idx, qos_boost_table->name);
 #endif
 		}
 	}
 #endif
 
-	if (core->dev->debugfs.perf_boost_mode & MFC_PERF_BOOST_CPU) {
-		for (i = 0; i < qos_boost_table->num_cluster; i++) {
-			exynos_pm_qos_add_request(&core->qos_req_cluster[i], PM_QOS_CLUSTER0_FREQ_MIN + (i * 2),
-					qos_boost_table->freq_cluster[i]);
-			mfc_core_debug(3, "[QoS][BOOST] CPU cluster[%d]: %d\n",
-					i, qos_boost_table->freq_cluster[i]);
-		}
-	}
+	if (core->dev->debugfs.perf_boost_mode & MFC_PERF_BOOST_CPU)
+		__mfc_qos_cpu_boost_enable(core);
 }
 
 void mfc_qos_perf_boost_disable(struct mfc_core *core)
 {
 	struct mfc_core_platdata *pdata = core->core_pdata;
-	int i;
 
 	if (core->dev->debugfs.perf_boost_mode & MFC_PERF_BOOST_DVFS) {
 		if (pdata->mfc_freq_control)
@@ -260,12 +288,8 @@ void mfc_qos_perf_boost_disable(struct mfc_core *core)
 	}
 #endif
 
-	if (core->dev->debugfs.perf_boost_mode & MFC_PERF_BOOST_CPU) {
-		for (i = 0; i < pdata->qos_boost_table->num_cluster; i++) {
-			exynos_pm_qos_remove_request(&core->qos_req_cluster[i]);
-			mfc_core_debug(3, "[QoS][BOOST] CPU cluster[%d] off\n", i);
-		}
-	}
+	if (core->dev->debugfs.perf_boost_mode & MFC_PERF_BOOST_CPU)
+		__mfc_qos_cpu_boost_disable(core);
 }
 
 void mfc_qos_set_portion(struct mfc_core *core, struct mfc_ctx *ctx)
@@ -870,8 +894,8 @@ void __mfc_qos_calculate(struct mfc_core *core, struct mfc_ctx *ctx, int delete)
 	unsigned long hw_mb = 0, total_mb = 0, total_fps = 0;
 	int total_bps = 0, mfc_freq_idx;
 	unsigned int fw_time, sw_time;
-	int i, found = 0, dec_found = 0, num_qos_steps;
-	int table_type = MFC_QOS_TABLE_TYPE_DEFAULT;
+	int i, found = 0, dec_found = 0, heif_found = 0;
+	int table_type = MFC_QOS_TABLE_TYPE_DEFAULT, num_qos_steps;
 #ifdef CONFIG_MFC_USE_BTS
 	struct bts_bw mfc_bw, curr_mfc_bw_ctx;
 #endif
@@ -894,6 +918,9 @@ void __mfc_qos_calculate(struct mfc_core *core, struct mfc_ctx *ctx, int delete)
 			mfc_ctx_debug(3, "[QoS][MFCIDLE] skip idle ctx [%d]\n", qos_ctx->num);
 			continue;
 		}
+		if (qos_ctx->is_heif_mode)
+			heif_found += 1;
+
 		if (qos_ctx->type == MFCINST_DECODER)
 			dec_found += 1;
 		hw_mb += __mfc_qos_get_mb_per_second(core, qos_core_ctx, pdata->max_mb);
@@ -945,8 +972,16 @@ void __mfc_qos_calculate(struct mfc_core *core, struct mfc_ctx *ctx, int delete)
 	core->mfc_freq_by_bps = core->dev->pdata->mfc_freqs[mfc_freq_idx];
 
 	if (delete && (list_empty(&core->qos_queue) || total_mb == 0)) {
+		if (core->cpu_boost_enable)
+			__mfc_qos_cpu_boost_disable(core);
 		__mfc_qos_operate(core, MFC_QOS_REMOVE, table_type, 0);
 	} else {
+		if (heif_found) {
+			i = num_qos_steps - 1;
+			mfc_ctx_debug(2, "[QoS][BOOST] use max level for HEIF\n");
+			if (!core->cpu_boost_enable)
+				__mfc_qos_cpu_boost_enable(core);
+		}
 #ifdef CONFIG_MFC_USE_BTS
 		__mfc_qos_set(core, ctx, &mfc_bw, table_type, i);
 #else
@@ -998,6 +1033,8 @@ void mfc_qos_off(struct mfc_core *core, struct mfc_ctx *ctx)
 	if (list_empty(&core->qos_queue)) {
 		if (atomic_read(&core->qos_req_cur) != 0) {
 			mfc_ctx_err("[QoS] MFC request count is wrong!\n");
+			if (core->cpu_boost_enable)
+				__mfc_qos_cpu_boost_disable(core);
 			__mfc_qos_operate(core, MFC_QOS_REMOVE, table_type, 0);
 		}
 		goto out;
@@ -1156,6 +1193,8 @@ void __mfc_qos_off_all(struct mfc_core *core)
 		list_del(&qos_core_ctx->qos_list);
 
 	/* Select the opend ctx structure for QoS remove */
+	if (core->cpu_boost_enable)
+		__mfc_qos_cpu_boost_disable(core);
 	__mfc_qos_operate(core, MFC_QOS_REMOVE, MFC_QOS_TABLE_TYPE_DEFAULT, 0);
 	mutex_unlock(&core->qos_mutex);
 }

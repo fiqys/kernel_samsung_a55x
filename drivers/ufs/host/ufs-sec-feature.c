@@ -1233,6 +1233,9 @@ void ufs_sec_config_features(struct ufs_hba *hba)
 void ufs_sec_adjust_caps_quirks(struct ufs_hba *hba)
 {
 	hba->caps &= ~UFSHCD_CAP_WB_EN;
+	
+	/* set ufs nop timeout as 100ms */
+	hba->nop_out_timeout = 100;
 }
 
 void ufs_sec_init_logging(struct device *dev)

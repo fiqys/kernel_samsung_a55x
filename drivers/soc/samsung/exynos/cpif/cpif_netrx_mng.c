@@ -11,7 +11,6 @@
 
 #include "cpif_netrx_mng.h"
 
-#define NETRX_POOL_PAGE_SIZE	SZ_64K
 struct cpif_netrx_mng *cpif_create_netrx_mng(struct cpif_addr_pair *desc_addr_pair,
 						u64 desc_size, u64 databuf_cp_pbase,
 						u64 frag_size, u64 num_packet)

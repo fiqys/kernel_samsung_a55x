@@ -43,11 +43,10 @@ enum EVENT_CMD {
 
 #define VIB_FREE_DURATION 0
 
-enum compose_thread_state {
-	COMPOSE_STOP = 0,
-	COMPOSE_RUN = 1,
-	COMPOSE_START = 2,
-	COMPOSE_EXIT = 3,
+enum compose_effect_state {
+	COMPOSE_EFFECT_END = 0,
+	COMPOSE_EFFECT_STOP = 1,
+	COMPOSE_EFFECT_PLAY = 2,
 };
 
 struct common_inputff_effect {
@@ -111,13 +110,14 @@ struct sec_vib_inputff_compose {
 	struct task_struct *compose_thread;
 	struct kthread_worker kworker;
 	struct kthread_work kwork;
-	int thread_exit;
-	int thread_state;
 	wait_queue_head_t delay_wait;
 	int num_of_compose_effects;
 	int upload_compose_effect;
 	int compose_effect_id;
 	int upload_partial_effect;
+	u32 pattern_idx;
+	struct ff_effect curr_effect;
+	int effect_state;
 	int compose_repeat;
 };
 
@@ -172,6 +172,7 @@ struct sec_vib_inputff_drvdata {
 	struct workqueue_struct *cal_workqueue;
 
 	bool fw_init_attempted;
+	struct hrtimer compose_effects_timer;
 };
 
 /* firmware load status. if fail, return err number */

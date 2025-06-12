@@ -255,15 +255,12 @@ drop:
 	return NETDEV_TX_OK;
 }
 
-static bool _is_tcp_ack_or_icmp(struct sk_buff *skb)
+static bool _is_tcp_ack(struct sk_buff *skb)
 {
 	u16 payload_len = 0;
 
 	switch (skb->protocol) {
 	case htons(ETH_P_IP):
-		if (ip_hdr(skb)->protocol == IPPROTO_ICMP)
-			return true;
-
 		if (ip_hdr(skb)->protocol != IPPROTO_TCP)
 			return false;
 
@@ -272,10 +269,7 @@ static bool _is_tcp_ack_or_icmp(struct sk_buff *skb)
 		payload_len = ntohs(ip_hdr(skb)->tot_len) - (ip_hdr(skb)->ihl << 2);
 		break;
 	case htons(ETH_P_IPV6):
-		if (ipv6_hdr(skb)->nexthdr == NEXTHDR_ICMP)
-			return true;
-
-		if (ipv6_hdr(skb)->nexthdr != NEXTHDR_TCP)
+		if (ipv6_hdr(skb)->nexthdr != IPPROTO_TCP)
 			return false;
 
 		if (skb->network_header == skb->transport_header)
@@ -296,12 +290,12 @@ static bool _is_tcp_ack_or_icmp(struct sk_buff *skb)
 	return false;
 }
 
-static inline bool is_tcp_ack_or_icmp(struct sk_buff *skb)
+static inline bool is_tcp_ack(struct sk_buff *skb)
 {
 	if (skb_is_tcp_pure_ack(skb))
 		return true;
 
-	if (unlikely(_is_tcp_ack_or_icmp(skb)))
+	if (unlikely(_is_tcp_ack(skb)))
 		return true;
 
 	return false;
@@ -311,15 +305,14 @@ static inline bool is_tcp_ack_or_icmp(struct sk_buff *skb)
 static u16 vnet_select_queue(struct net_device *dev, struct sk_buff *skb,
 		struct net_device *sb_dev)
 {
+#if IS_ENABLED(CONFIG_MODEM_IF_LEGACY_QOS)
 	struct vnet *vnet = netdev_priv(dev);
+#endif
 
 	if (!skb)
 		return 0;
 
-	if (vnet->hiprio_ack_only && skb->len > (HIPRIO_MAX_PACKET_SIZE - CP_PADDING))
-		return 0;
-
-	if (is_tcp_ack_or_icmp(skb))
+	if (is_tcp_ack(skb))
 		return 1;
 
 #if IS_ENABLED(CONFIG_MODEM_IF_LEGACY_QOS)
