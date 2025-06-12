@@ -56,6 +56,7 @@
 #endif
 #include <linux/cma.h>
 #include <linux/genalloc.h>
+#include <linux/pm_qos.h>
 
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
@@ -890,6 +891,7 @@ struct mfc_qos {
 
 struct mfc_qos_boost {
 	unsigned int num_cluster;
+	unsigned int num_cpu[MAX_NUM_CLUSTER];
 	unsigned int freq_mfc;
 	unsigned int freq_int;
 	unsigned int freq_mif;
@@ -1715,7 +1717,7 @@ struct mfc_core {
 	struct exynos_pm_qos_request qos_req_mfc;
 	struct exynos_pm_qos_request qos_req_int;
 	struct exynos_pm_qos_request qos_req_mif;
-	struct exynos_pm_qos_request qos_req_cluster[MAX_NUM_CLUSTER];
+	struct freq_qos_request qos_req_cluster[MAX_NUM_CLUSTER];
 #endif
 	struct mutex qos_mutex;
 	int mfc_freq_by_bps;
@@ -1726,6 +1728,7 @@ struct mfc_core {
 	unsigned int prev_bts_scen_idx;
 #endif
 	unsigned long total_mb;
+	unsigned int cpu_boost_enable;
 
 	/* QoS control depending on MFC H/W run */
 	struct workqueue_struct *qos_ctrl_wq;
@@ -2608,6 +2611,8 @@ struct mfc_ctx {
 	/* for AV1 Annex B */
 	int is_av1_annex_b;
 
+	int is_heif_mode;
+
 	int is_dpb_realloc;
 	enum mfc_dec_wait_state wait_state;
 	struct mutex drc_wait_mutex;
@@ -2660,6 +2665,7 @@ struct mfc_ctx {
 	dma_addr_t last_dst_addr[MFC_MAX_PLANES];
 
 	int batch_mode;
+	int dec_batch_disable;
 	bool mem_type_10bit;
 
 	int gdc_votf;

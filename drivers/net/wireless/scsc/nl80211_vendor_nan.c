@@ -902,10 +902,11 @@ int slsi_nan_disable(struct wiphy *wiphy, struct wireless_dev *wdev, const void 
 	struct net_device *dev = slsi_nan_get_netdev(sdev);
 	struct net_device *data_dev;
 	struct netdev_vif *ndev_vif = NULL, *data_ndev_vif;
-	u8 i;
+	u8 i,j;
 	int type, tmp;
 	const struct nlattr *iter;
 	u16 transaction_id = 0;
+	struct slsi_peer *peer;
 
 	nla_for_each_attr(iter, data, len, tmp) {
 		type = nla_type(iter);
@@ -937,6 +938,16 @@ int slsi_nan_disable(struct wiphy *wiphy, struct wireless_dev *wdev, const void 
 				data_ndev_vif = netdev_priv(data_dev);
 				SLSI_MUTEX_LOCK(data_ndev_vif->vif_mutex);
 				slsi_vif_cleanup(sdev, data_dev, true, 0);
+				slsi_spinlock_lock(&ndev_vif->peer_lock);
+				for (j = 0; j < SLSI_ADHOC_PEER_CONNECTIONS_MAX; j++) {
+					peer = data_ndev_vif->peer_sta_record[j];
+					if (peer && peer->valid) {
+						slsi_ps_port_control(sdev, dev, peer, SLSI_STA_CONN_STATE_DISCONNECTED);
+						peer->ndp_count = 0;
+						slsi_peer_remove(sdev, dev, peer);
+					}
+				}
+				slsi_spinlock_unlock(&ndev_vif->peer_lock);
 				data_ndev_vif->nan.ndp_count = 0;
 				SLSI_MUTEX_UNLOCK(data_ndev_vif->vif_mutex);
 			}
@@ -1973,7 +1984,6 @@ int slsi_nan_get_capabilities(struct wiphy *wiphy, struct wireless_dev *wdev, co
 						  { SLSI_PSID_UNIFI_NAN_MAX_SERVICE_SPECIFIC_INFO_LENGTH, { 0, 0 } },
 						  { SLSI_PSID_UNIFI_NAN_MAX_NDP_SESSIONS, { 0, 0 } },
 						  { SLSI_PSID_UNIFI_NAN_MAX_APP_INFO_LENGTH, { 0, 0 } },
-						  { SLSI_PSID_UNIFI_NAN_MAX_QUEUED_FOLLOWUPS, { 0, 0 } },
 						  { SLSI_PSID_UNIFI_NAN_MAX_SUBSCRIBE_INTERFACE_ADDRESSES, { 0, 0 } },
 						  { SLSI_PSID_UNIFI_NAN_SUPPORTED_CIPHER_SUITES, { 0, 0 }, },
 						  { SLSI_PSID_UNIFI_NAN_MAX_EXTENDED_SERVICE_SPECIFIC_INFO_LEN, { 0, 0} },
@@ -1987,7 +1997,6 @@ int slsi_nan_get_capabilities(struct wiphy *wiphy, struct wireless_dev *wdev, co
 					&nan_capabilities.max_service_specific_info_len,
 					&nan_capabilities.max_ndp_sessions,
 					&nan_capabilities.max_app_info_len,
-					&nan_capabilities.max_queued_transmit_followup_msgs,
 					&nan_capabilities.max_subscribe_address,
 					&nan_capabilities.cipher_suites_supported,
 					&nan_capabilities.max_sdea_service_specific_info_len,
@@ -2053,7 +2062,8 @@ int slsi_nan_get_capabilities(struct wiphy *wiphy, struct wireless_dev *wdev, co
 			 SLSI_NAN_MAX_NDP_INSTANCES);
 		nan_capabilities.max_ndp_sessions = SLSI_NAN_MAX_NDP_INSTANCES;
 	}
-
+	/* Currently Firmware and driver supports only one follow up message per peer at the same time */
+	nan_capabilities.max_queued_transmit_followup_msgs = 1;
 	SLSI_INFO(sdev, "transId:%d\n", transaction_id);
 
 	kfree(values);
@@ -3526,18 +3536,7 @@ void slsi_nan_ndp_setup_ind(struct slsi_dev *sdev, struct net_device *dev, struc
 		 * indicates the NDL VIF is successfully created/associated
 		 * in Firmware. So "activated" is set to True here.
 		 */
-#ifdef CONFIG_SCSC_WLAN_TX_API
-		if (!slsi_vif_activated_post(sdev, data_dev, ndev_data_vif)) {
-			SLSI_ERR(sdev, "fail to activate NAN NDI VIF\n");
-			SLSI_MUTEX_UNLOCK(ndev_data_vif->vif_mutex);
-			kfree_skb(nl_skb);
-			goto exit;
-		}
-#endif
-#ifdef CONFIG_SCSC_WLAN_LOAD_BALANCE_MANAGER
-		slsi_lbm_netdev_activate(sdev, data_dev);
-#endif
-		slsi_rx_ba_update_timer(sdev, data_dev, SLSI_RX_BA_EVENT_VIF_CONNECTED);
+
 		ndev_data_vif->activated = true;
 
 		slsi_spinlock_lock(&ndev_vif->peer_lock);
@@ -3752,8 +3751,9 @@ void slsi_nan_ndp_termination_handler(struct slsi_dev *sdev, struct net_device *
 			ndev_data_vif->nan.ndp_count--;
 		SLSI_MUTEX_UNLOCK(ndev_data_vif->vif_mutex);
 	}
+	if (ndev_vif->nan.ndp_active_id_map & BIT(ndp_instance_id))
+		slsi_nan_del_peer(sdev, dev, ndi, ndp_instance_id);
 	ndev_vif->nan.ndp_active_id_map &= ~BIT(ndp_instance_id);
-	slsi_nan_del_peer(sdev, dev, ndi, ndp_instance_id);
 	slsi_nan_ndp_del_entry(sdev, dev, ndp_instance_id, false);
 
 	if (data_dev) {

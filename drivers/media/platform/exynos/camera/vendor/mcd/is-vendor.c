@@ -2425,6 +2425,18 @@ int release_shared_rsc(struct ois_mcu_dev *mcu)
 	return atomic_dec_return(&mcu->shared_rsc_count);
 }
 
+void is_vendor_mcu_power_on_wait(void)
+{
+	struct is_core *core = NULL;
+	struct ois_mcu_dev *mcu = NULL;
+	core = is_get_is_core();
+	if (!core->mcu)
+		return;
+
+	mcu = core->mcu;
+	cancel_work_sync(&mcu->mcu_power_on_work);
+}
+
 void is_vendor_mcu_power_on(bool use_shared_rsc)
 {
 	struct is_core *core = NULL;
@@ -2444,15 +2456,14 @@ void is_vendor_mcu_power_on(bool use_shared_rsc)
 			info("%s: mcu is already on. active count = %d\n", __func__, active_count);
 			return;
 		}
+		schedule_work(&mcu->mcu_power_on_work);
+	} else {
+		is_vendor_ois_power_ctrl(mcu, 0x1);
+		is_vendor_ois_load_binary(mcu);
+		is_vendor_ois_core_ctrl(mcu, 0x1);
+		is_vendor_ois_device_ctrl(mcu, 0x1);
+		info_mcu("%s: mcu on.\n", __func__);
 	}
-
-	is_vendor_ois_power_ctrl(mcu, 0x1);
-	is_vendor_ois_load_binary(mcu);
-	is_vendor_ois_core_ctrl(mcu, 0x1);
-	if (!use_shared_rsc)
-		is_vendor_ois_device_ctrl(mcu, 0x01);
-
-	info("%s: mcu on.\n", __func__);
 }
 
 void is_vendor_mcu_power_off(bool use_shared_rsc)
@@ -2468,6 +2479,7 @@ void is_vendor_mcu_power_off(bool use_shared_rsc)
 	mcu = core->mcu;
 
 	if (use_shared_rsc) {
+		is_vendor_mcu_power_on_wait();
 		active_count = release_shared_rsc(mcu);
 		mcu->current_rsc_count = active_count;
 		if (active_count != MCU_SHARED_SRC_OFF_COUNT) {

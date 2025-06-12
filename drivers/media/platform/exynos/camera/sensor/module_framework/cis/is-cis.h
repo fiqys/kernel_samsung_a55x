@@ -82,6 +82,7 @@ struct sensor_cis_info {
 	u16 seamless_wait_cnt;
 	bool use_group_param_hold;
 	bool use_debug_seamless_control;
+	bool use_8bit_addr;
 	const struct sensor_cis_mode_info **mode_infos;
 	u32 mode_count;
 	const struct cam_mipi_sensor_mode *mipi_mode;
@@ -96,6 +97,7 @@ struct sensor_cis_mode_info {
 	const struct sensor_regs setfile;
 	u16 setfile_fcm_index;
 	const struct sensor_regs setfile_fcm;
+	const struct sensor_regs setfile_aeb_fcm;
 
 	u64 pclk;
 	u16 frame_length_lines;

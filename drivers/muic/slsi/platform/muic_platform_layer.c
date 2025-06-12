@@ -1542,6 +1542,9 @@ static int muic_manager_set_property(struct power_supply *psy,
 		case POWER_SUPPLY_LSI_PROP_PD_SUPPORT:
 			sdata->is_pdic_probe = true;
 			break;
+		case POWER_SUPPLY_LSI_PROP_SBU_OVP_STATE:
+			MUIC_PDATA_VOID_FUNC_MULTI_PARAM(ic_data->m_ops.set_sbu_ovp_state, ic_data->drv_data, val->intval);
+			break;
 		default:
 			ret = -EINVAL;
 		}

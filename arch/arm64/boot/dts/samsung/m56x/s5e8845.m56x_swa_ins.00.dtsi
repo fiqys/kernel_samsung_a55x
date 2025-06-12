@@ -12,7 +12,7 @@
 #include "s5e8845-m56x_common.dtsi"
 //#include "panel/samsung-emulation-video-panel.dtsi"
 //#include "../../exynos/board/panel/samsung-s6e3had-1080-2400-command-panel.dtsi"
-//#include "camera/s5e8845-a55x-camera_01.dtsi"
+#include "camera/s5e8845-m56x-camera_00.dtsi"
 
 / {
 	compatible = "samsung,M56X SWA INS", "samsung,S5E8845";

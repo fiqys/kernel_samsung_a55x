@@ -12,6 +12,8 @@
 #include "cpif_page.h"
 #include "cpif_vmapper.h"
 
+#define NETRX_POOL_PAGE_SIZE	SZ_64K
+
 struct cpif_addr_pair {
 	u64			cp_addr;	/* cp address */
 	void			*ap_addr;	/* ap virtual address */

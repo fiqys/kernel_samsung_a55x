@@ -1742,6 +1742,7 @@ static void is_sensor_reset_state(struct is_device_sensor *device)
 	clear_bit(SENSOR_MODULE_GOT_INTO_TROUBLE, &device->state);
 	clear_bit(IS_SENSOR_ASSERT_CRASH, &device->state);
 	clear_bit(IS_SENSOR_S_POWER, &device->state);
+	clear_bit(IS_SENSOR_SUSPEND, &device->state);
 
 	device->smc_state = IS_SENSOR_SMC_INIT;
 	device->vctx = NULL;
@@ -1904,6 +1905,7 @@ int is_sensor_close(struct is_device_sensor *device)
 	clear_bit(IS_SENSOR_OPEN, &device->state);
 	clear_bit(IS_SENSOR_S_INPUT, &device->state);
 	clear_bit(IS_SENSOR_ITF_REGISTER, &device->state);
+	clear_bit(IS_SENSOR_SUSPEND, &device->state);
 
 p_err:
 	minfo("[SS%d:D] %s():%d\n", device, device->device_id,  __func__, ret);
@@ -3727,6 +3729,7 @@ int is_sensor_runtime_suspend(struct device *dev)
 	if (ret)
 		mwarn("is_sensor_iclk_off is fail(%d)", device, ret);
 
+	set_bit(IS_SENSOR_SUSPEND, &device->state);
 	v4l2_device_unregister_subdev(device->subdev_module);
 	device->subdev_module = NULL;
 
@@ -3781,6 +3784,8 @@ int is_sensor_runtime_resume(struct device *dev)
 		merr("is_sensor_iclk_on is fail(%d)", device, ret);
 		goto p_err;
 	}
+
+	clear_bit(IS_SENSOR_SUSPEND, &device->state);
 
 p_err:
 	minfo("[SS%d:D] %s():%d\n", device, device->device_id, __func__, ret);

@@ -59,6 +59,7 @@ struct exynos_hibernation {
 	unsigned int min_entry_fps;
 
 	struct exynos_hiber_profile profile;
+	struct timer_list debug_timer;
 };
 
 static inline bool is_hibernaton_blocked(struct exynos_hibernation *hiber)

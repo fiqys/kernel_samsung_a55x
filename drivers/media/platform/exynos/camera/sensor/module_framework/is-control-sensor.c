@@ -888,9 +888,9 @@ void is_sensor_ctl_frame_evt(struct is_device_sensor *device)
 	}
 
 	if (sensor_peri->mcu && sensor_peri->mcu->ois) {
-#if defined(CONFIG_CAMERA_USE_EXTERNAL_MCU) || defined(CONFIG_CAMERA_USE_AOIS)
+#if defined(CONFIG_CAMERA_USE_EXTERNAL_MCU) || defined(CONFIG_CAMERA_USE_AOIS) || defined(INITIALIZE_OIS_MODE)
 		if (sensor_peri->mcu->ois->ois_mode == OPTICAL_STABILIZATION_MODE_OFF)
-			if (cis->cis_data->is_data.scene_mode == AA_SCENE_MODE_FAST_AE)
+			if (sensor_peri->cis.cis_data->is_data.scene_mode == AA_SCENE_MODE_FAST_AE)
 				sensor_peri->mcu->ois->ois_mode = OPTICAL_STABILIZATION_MODE_STILL;
 #endif
 		if (CALL_OISOPS(sensor_peri->mcu->ois, ois_get_active, sensor_peri->subdev_mcu)) {

@@ -1282,12 +1282,18 @@ static enum hrtimer_restart pktproc_tx_timer_func(struct hrtimer *timer)
 	struct mem_link_device *mld = container_of(timer, struct mem_link_device, pktproc_tx_timer);
 	struct pktproc_adaptor_ul *ppa_ul = &mld->pktproc_ul;
 	struct modem_ctl *mc = mld->link_dev.mc;
+	struct link_device *ld = &mld->link_dev;
 	bool need_schedule = false;
 	bool need_irq = false;
 	bool need_dit = false;
 	unsigned long flags;
 	unsigned int count;
 	int ret, i;
+
+	if (ld->tx_flowctrl_mask) {
+		mif_err_limited("flowctrl=0x%04lx\n", ld->tx_flowctrl_mask);
+		cpif_wake_lock_timeout(mc->iod->ws, msecs_to_jiffies(5));
+	}
 
 	for (i = 0; i < ppa_ul->num_queue; i++) {
 		struct pktproc_queue_ul *q = ppa_ul->q[i];

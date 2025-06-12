@@ -754,6 +754,7 @@ retry:
 		err = -EEXIST;
 		goto out4;
 	}
+	/* @fs.sec -- e90bd089805bbf88e82176c16f63c85f -- */
 	flags &= ~(RENAME_NOREPLACE);
 
 	if (old_child == trap) {
@@ -1102,9 +1103,12 @@ static bool __dir_empty(struct dir_context *ctx, const char *name, int namlen,
 	struct ksmbd_readdir_data *buf;
 
 	buf = container_of(ctx, struct ksmbd_readdir_data, ctx);
-	buf->dirent_count++;
+	/* @fs.sec -- 69a456ea7695f7a89a1cf857c5fcead2 -- */
+	if (!(name[0] == '.' && (namlen < 2 ||
+					(namlen == 2 && name[1] == '.'))))
+		buf->dirent_count++;
 
-	return buf->dirent_count <= 2;
+	return !buf->dirent_count;
 }
 
 /**
@@ -1124,7 +1128,7 @@ int ksmbd_vfs_empty_dir(struct ksmbd_file *fp)
 	readdir_data.dirent_count = 0;
 
 	err = iterate_dir(fp->filp, &readdir_data.ctx);
-	if (readdir_data.dirent_count > 2)
+	if (readdir_data.dirent_count)
 		err = -ENOTEMPTY;
 	else
 		err = 0;
@@ -1626,8 +1630,6 @@ int ksmbd_vfs_get_dos_attrib_xattr(struct user_namespace *user_ns,
 		if (ndr_decode_dos_attr(&n, da))
 			err = -EINVAL;
 		kfree(n.data);
-	} else {
-		ksmbd_debug(SMB, "failed to load dos attribute in xattr\n");
 	}
 
 	return err;
@@ -1695,8 +1697,6 @@ int ksmbd_vfs_fill_dentry_attrs(struct ksmbd_work *work,
 		if (rc > 0) {
 			ksmbd_kstat->file_attributes = cpu_to_le32(da.attr);
 			ksmbd_kstat->create_time = da.create_time;
-		} else {
-			ksmbd_debug(VFS, "fail to load dos attribute.\n");
 		}
 	}
 

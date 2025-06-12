@@ -510,6 +510,8 @@ static int dwc3_otg_start_host(struct otg_fsm *fsm, int on)
 		dwc3_exynos_core_init(dwc, exynos);
 		dwc3_bus_control(exynos, 1);
 
+		dwc3_core_susphy_set(dwc, 1);
+
 		pr_info("%s: usb_role_switch_set_role = DWC3_GCTL_PRTCAP_HOST\n", __func__);
 		usb_role_switch_set_role(dwc->role_sw, DWC3_GCTL_PRTCAP_HOST);
 

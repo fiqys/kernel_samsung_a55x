@@ -22,6 +22,7 @@
 //#include "../../exynos/board/erd/camera/s5e8845-erd8845-camera.dtsi"
 #include "../../exynos/board/erd/s5e8845-cp-s5328ap-sipc.dtsi"
 #include "../s5e8845-sec_pm_common.dtsi"
+#include "../s5e8845_wakeup_cpu_allocator.dtsi"
 
 #define BOARD_ID	0x0
 
@@ -48,6 +49,8 @@
 					label = "gpio-keys: KEY_VOLUMEUP";
 					linux,code = <115>;
 					gpios = <&gpa0 3 0xf>;
+					debounce-interval = <0x0f>;
+					gpio-key,wakeup;
 				};
 			};
 
@@ -536,7 +539,7 @@
 						sound-dai = <&abox_uaif_1>;
 					};
 					codec {
-						sound-dai = <&tas25xx 0>;
+						sound-dai = <&tas25xx 0 &fs1816_amp 0>;
 					};
 				};
 				uaif2 {
@@ -849,7 +852,7 @@
 				compatible = "samsung,audio-sysfs";
 				status = "okay";
 				audio,no-earjack;
-				audio,num-amp = <2>;
+				audio,num-amp = <1>;
 			};
 
 			sec-audio-debug {
@@ -858,6 +861,11 @@
 
 				abox_dbg_size_min = <0x600000>;
 				abox_slog_size_min = <0x0>;
+			};
+
+			snd-debug-proc {
+				compatible = "samsung,snd-debug-proc";
+				status = "okay";
 			};
 
 			usb_hs_tune:hs_tune {
@@ -913,13 +921,12 @@
 };
 
 &pinctrl_1 {
-	rcv_amp_en: rcv-amp-en {
+	rcv_amp_int: rcv-amp-int {
 		samsung,pins ="gpm8-0";
-		samsung,pin-function = <1>;
-		samsung,pin-val = <1>;
+		samsung,pin-function = <0xf>;
 		samsung,pin-pud = <0>;
-		samsung,pin-con-pdn = <3>;
-		samsung,pin-pud-pdn = <0>;
+		samsung,pin-val = <1>;
+		samsung,pin-drv = <0>;
 	};
 	spk_amp_en: spk-amp-en {
 		samsung,pins ="gpm5-0";
@@ -933,6 +940,7 @@
 		samsung,pins ="gpm9-0";
 		samsung,pin-function = <0xf>;
 		samsung,pin-pud = <3>;
+		samsung,pin-con-pdn = <3>;
 		samsung,pin-pud-pdn = <3>;
 	};
 	dmic_en: dmic-en {
@@ -1022,6 +1030,25 @@
 	samsung,conf-file-name = "abox_solution_ti.conf", "abox_system.conf";
 };
 
+&hsi2c_13 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+	clock-frequency = <400000>;
+
+	fs1816_amp: fs1816@34 {
+		compatible = "foursemi,fs1816";
+		#sound-dai-cells = <1>;
+		reg = <0x34>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&rcv_amp_int>;
+		intz-gpios = <&gpm8 0 0>;
+		fs,rx_channel = <3>; /* MonoMix */
+		fs,rx_volume = <991>;
+		status = "okay";
+	};
+};
+
 &hsi2c_16 {
 	#address-cells = <1>;
 	#size-cells = <0>;
@@ -1038,16 +1065,14 @@
 
 	tas25xx: tas25xx@48 {
 		pinctrl-names = "default";
-		pinctrl-0 = <&rcv_amp_en &spk_amp_en &spk_amp_int>;
+		pinctrl-0 = <&spk_amp_en &spk_amp_int>;
 		#sound-dai-cells = <1>;
 		compatible = "ti,tas25xx";
 		reg = <0x48>;
-		ti,max-channels = <2>;
-		ti,channel-0 = <0x49>;
-		ti,channel-1 = <0x48>;
-		ti,reset-gpio = <&gpm8 0 0>;
+		ti,max-channels = <1>;
+		ti,channel-0 = <0x48>;
+		ti,reset-gpio = <&gpm5 0 0>;
 		ti,irq-gpio = <&gpm9 0 0>;
-		ti,reset-gpio2 = <&gpm5 0 0>;
 		status = "okay";
 	};
 
@@ -1146,8 +1171,7 @@
 };
 
 &dwmmc_2 {
-	card-detect-invert;
-	sec-sd-slot-type = <3>; /* Hybrid Tray SD slot */
+	status = "disabled";
 };
 
 &ufs {
@@ -1157,5 +1181,5 @@
 
 &cpif {
 	pinctrl-names = "default";
-		pinctrl-0 = <&tray_detect &usim1_en &usim2_en &fr1_rfic_reset &cp_ese_rst>;
+	pinctrl-0 = <&tray_detect &usim1_en &usim2_en &fr1_rfic_reset>;
 };

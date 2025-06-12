@@ -75,12 +75,10 @@ static struct ieee80211_channel slsi_5ghz_channels[] = {
 	CHAN5G(5785, 157),
 	CHAN5G(5805, 161),
 	CHAN5G(5825, 165),
-#ifdef CONFIG_SCSC_UNII4
 	/* UNII 4 */
 	CHAN5G(5845, 169),
 	CHAN5G(5865, 173),
 	CHAN5G(5885, 177),
-#endif
 };
 
 #ifdef CONFIG_SCSC_WLAN_SUPPORT_6G

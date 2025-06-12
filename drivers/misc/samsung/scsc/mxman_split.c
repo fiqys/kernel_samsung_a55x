@@ -2119,16 +2119,6 @@ static void mxman_failure_work_wlan(struct work_struct *work)
 #endif
 	/* Take mutex shared with syserr recovery */
 	mutex_lock(&mxman->mxman_recovery_mutex);
-
-	process_panic_record(mxman, false);
-	mxman_check_promote_syserr(mxman);
-	SCSC_TAG_INFO(MXMAN, "This syserr level %d. Triggering moredump at level %d\n", mxman->last_syserr.level,
-				trigger_moredump_level);
-
-	blocking_notifier_call_chain(&firmware_chain, SCSC_FW_EVENT_FAILURE, NULL);
-
-	SCSC_TAG_INFO(MXMAN, "Complete mm_msg_start_ind_completion\n");
-	complete(&mxman->mm_msg_start_ind_completion);
 	mutex_lock(&mxman->mxman_mutex);
 
 	if (!mxman_in_started_state_subsystem(mxman, SCSC_SUBSYSTEM_WLAN) && !mxman_in_starting_state(mxman)) {
@@ -2154,6 +2144,16 @@ static void mxman_failure_work_wlan(struct work_struct *work)
 		mxmgmt_transport_register_channel_handler(scsc_mx_get_mxmgmt_transport(mx), MMTRANS_CHAN_ID_MAXWELL_MANAGEMENT,NULL, NULL);
 		mxmgmt_transport_set_error(scsc_mx_get_mxmgmt_transport(mx));
 	}
+
+	process_panic_record(mxman, false);
+	mxman_check_promote_syserr(mxman);
+	SCSC_TAG_INFO(MXMAN, "This syserr level %d. Triggering moredump at level %d\n", mxman->last_syserr.level,
+				trigger_moredump_level);
+
+	blocking_notifier_call_chain(&firmware_chain, SCSC_FW_EVENT_FAILURE, NULL);
+
+	SCSC_TAG_INFO(MXMAN, "Complete mm_msg_start_ind_completion\n");
+	complete(&mxman->mm_msg_start_ind_completion);
 
 	/* Show status of MSI interrupts */
 #if defined(CONFIG_SCSC_PCIE_CHIP)
@@ -2350,16 +2350,6 @@ static void mxman_failure_work_wpan(struct work_struct *work)
 #endif
 	/* Take mutex shared with syserr recovery */
 	mutex_lock(&mxman->mxman_recovery_mutex);
-
-	process_panic_record(mxman, false);
-	mxman_check_promote_syserr(mxman);
-	SCSC_TAG_INFO(MXMAN, "This syserr level %d. Triggering moredump at level %d\n", mxman->last_syserr.level,
-				trigger_moredump_level);
-
-	blocking_notifier_call_chain(&firmware_chain, SCSC_FW_EVENT_FAILURE, NULL);
-
-	SCSC_TAG_INFO(MXMAN, "Complete mm_msg_start_ind_completion\n");
-	complete(&mxman->mm_msg_start_ind_completion);
 	mutex_lock(&mxman->mxman_mutex);
 
 	if (!mxman_in_started_state_subsystem(mxman, SCSC_SUBSYSTEM_WPAN) && !mxman_in_starting_state(mxman)) {
@@ -2376,6 +2366,16 @@ static void mxman_failure_work_wpan(struct work_struct *work)
 		mutex_unlock(&mxman->mxman_recovery_mutex);
 		return;
 	}
+
+	process_panic_record(mxman, false);
+	mxman_check_promote_syserr(mxman);
+	SCSC_TAG_INFO(MXMAN, "This syserr level %d. Triggering moredump at level %d\n", mxman->last_syserr.level,
+				trigger_moredump_level);
+
+	blocking_notifier_call_chain(&firmware_chain, SCSC_FW_EVENT_FAILURE, NULL);
+
+	SCSC_TAG_INFO(MXMAN, "Complete mm_msg_start_ind_completion\n");
+	complete(&mxman->mm_msg_start_ind_completion);
 
 	if (mxman_subsys_active(mxman, SCSC_SUBSYSTEM_WPAN)) {
 		SCSC_TAG_INFO(MXMAN, "Setting Errors in WPAN transports\n");
@@ -2575,6 +2575,26 @@ static void mxman_failure_work(struct work_struct *work)
 #endif
 	/* Take mutex shared with syserr recovery */
 	mutex_lock(&mxman->mxman_recovery_mutex);
+	mutex_lock(&mxman->mxman_mutex);
+	srvman = scsc_mx_get_srvman(mxman->mx);
+
+	if (!mxman_in_started_state(mxman) && !mxman_in_starting_state(mxman)) {
+		SCSC_TAG_WARNING(MXMAN, "Not in started state: mxman->mxman_state=%d\n", mxman->mxman_state);
+#if defined(CONFIG_WLBT_SPLIT_RECOVERY)
+		mxman_send_rcvry_evt_to_fsm(mxman, RCVRY_EVT_FAILURE_WORK_ERR);
+#else
+		mxman->panic_in_progress = false;
+#endif
+#if defined(CONFIG_SCSC_PCIE_CHIP)
+		scsc_mx_service_release(MXMAN_FAILURE_WORK);
+#endif
+#ifdef CONFIG_SCSC_COMMON_ANDROID
+		wake_unlock(&mxman->failure_recovery_wake_lock);
+#endif
+		mutex_unlock(&mxman->mxman_mutex);
+		mutex_unlock(&mxman->mxman_recovery_mutex);
+		return;
+	}
 
 	/* Check panic code for error promotion early on.
 	 * Attempt to parse the panic record, to get the panic ID. This will
@@ -2598,29 +2618,8 @@ static void mxman_failure_work(struct work_struct *work)
 	}
 
 	blocking_notifier_call_chain(&firmware_chain, SCSC_FW_EVENT_FAILURE, NULL);
-
 	SCSC_TAG_INFO(MXMAN, "Complete mm_msg_start_ind_completion\n");
 	complete(&mxman->mm_msg_start_ind_completion);
-	mutex_lock(&mxman->mxman_mutex);
-	srvman = scsc_mx_get_srvman(mxman->mx);
-
-	if (!mxman_in_started_state(mxman) && !mxman_in_starting_state(mxman)) {
-		SCSC_TAG_WARNING(MXMAN, "Not in started state: mxman->mxman_state=%d\n", mxman->mxman_state);
-#if defined(CONFIG_WLBT_SPLIT_RECOVERY)
-		mxman_send_rcvry_evt_to_fsm(mxman, RCVRY_EVT_FAILURE_WORK_ERR);
-#else
-		mxman->panic_in_progress = false;
-#endif
-#if defined(CONFIG_SCSC_PCIE_CHIP)
-		scsc_mx_service_release(MXMAN_FAILURE_WORK);
-#endif
-#ifdef CONFIG_SCSC_COMMON_ANDROID
-		wake_unlock(&mxman->failure_recovery_wake_lock);
-#endif
-		mutex_unlock(&mxman->mxman_mutex);
-		mutex_unlock(&mxman->mxman_recovery_mutex);
-		return;
-	}
 
 	/**
 	 * Set error on mxlog and unregister mxlog msg-handlers.

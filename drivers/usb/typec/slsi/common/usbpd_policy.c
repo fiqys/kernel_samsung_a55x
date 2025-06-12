@@ -468,6 +468,9 @@ policy_state usbpd_policy_src_ready(struct policy_data *policy)
 
 		ms = usbpd_check_time1(pd_data);
 
+		if (ms > 2)
+			CHECK_CMD(pd_data, MANAGER_REQ_SOFT_RESET, PE_SRC_Send_Soft_Reset, 0);
+
 #if IS_ENABLED(CONFIG_PDIC_PD30)
 		/* Specification Revision */
 		if(pd_data->specification_revision == USBPD_PD3_0){
@@ -674,9 +677,6 @@ policy_state usbpd_policy_src_hard_reset(struct policy_data *policy)
 	/* PD State Inform for AP */
 	dev_info(pd_data->dev, "%s\n", __func__);
 
-	/* Message ID Clear */
-	usbpd_init_counters(pd_data);
-
 	/* Policy Initialization */
 	usbpd_init_policy(pd_data);
 
@@ -701,6 +701,9 @@ policy_state usbpd_policy_src_hard_reset(struct policy_data *policy)
 		if (ms >= tPSHardReset)
 			break;
 	}
+
+	/* Message ID Clear */
+	usbpd_init_counters(pd_data);
 
 	if (ret == PE_SRC_Hard_Reset)
 		return ret;
@@ -1507,6 +1510,10 @@ policy_state usbpd_policy_snk_ready(struct policy_data *policy)
 
 
 		ms = usbpd_check_time1(pd_data);
+
+		if (ms > 5)
+			CHECK_CMD(pd_data, MANAGER_REQ_SOFT_RESET, PE_SNK_Send_Soft_Reset, 0);
+
 #if IS_ENABLED(CONFIG_PDIC_PD30)
 		/* Specification Revision */
 		if(pd_data->specification_revision == USBPD_PD3_0){
@@ -1516,7 +1523,7 @@ policy_state usbpd_policy_snk_ready(struct policy_data *policy)
 			CHECK_MSG(pd_data, MSG_FR_SWAP, PE_SNK_Send_Not_Supported);
 			CHECK_MSG(pd_data, MSG_GET_PPS_STATUS, PE_SNK_Send_Not_Supported);
 			CHECK_MSG(pd_data, MSG_GET_COUNTRY_CODES, PE_SNK_Send_Not_Supported);
-			CHECK_MSG(pd_data, MSG_GET_SINK_CAP_EXTENDED, PE_SNK_Send_Not_Supported);
+			CHECK_MSG(pd_data, MSG_GET_SINK_CAP_EXTENDED, PE_SNK_Give_Sink_Cap_Ext);
 			CHECK_MSG(pd_data, MSG_GET_REVISION, PE_Give_Revision);
 			CHECK_MSG(pd_data, MSG_GET_SOURCE_INFO, PE_DR_SNK_Give_Source_Info);
 
@@ -1597,7 +1604,7 @@ policy_state usbpd_policy_snk_ready(struct policy_data *policy)
 
 				PDIC_OPS_PARAM_FUNC(get_rp_level, pd_data, &rp_level);
 				if (rp_level == RP_CURRENT_LEVEL3) {
-					CHECK_CMD(pd_data, MANAGER_REQ_NEW_POWER_SRC, PE_SNK_Select_Capability, 0);
+					CHECK_CMD(pd_data, MANAGER_REQ_NEW_POWER_SRC, PE_SNK_Select_Capability, 10);
 					CHECK_CMD(pd_data, MANAGER_REQ_GET_SRC_CAP, PE_SNK_Get_Source_Cap, 0);
 					CHECK_CMD(pd_data, MANAGER_REQ_PR_SWAP, PE_PRS_SNK_SRC_Send_Swap, 0);
 					CHECK_CMD(pd_data, MANAGER_REQ_DR_SWAP, PE_DRS_Evaluate_Send_Port, 0);
@@ -1789,6 +1796,8 @@ policy_state usbpd_policy_snk_give_sink_cap(struct policy_data *policy)
 		SOFT_RESET();
 	} else
 		ret = PE_SNK_Ready;
+
+	PDIC_OPS_FUNC(give_sink_cap, pd_data);
 
 	return ret;
 }
@@ -4886,6 +4895,8 @@ policy_state usbpd_policy_dr_src_give_sink_cap(struct policy_data *policy)
 		ret = PE_SRC_Ready;
 
 	/* Sink Capabilities message sent */
+	PDIC_OPS_FUNC(give_sink_cap, pd_data);
+
 	return ret;
 }
 
@@ -5049,7 +5060,7 @@ policy_state usbpd_policy_src_send_not_supported(struct policy_data *policy)
 	if ((pd_data->protocol_rx.msg_header.extended)
 		&& (pd_data->protocol_rx.data_obj[0].extended_msg_header_type.chunked)
 		&& (pd_data->protocol_rx.data_obj[0].extended_msg_header_type.data_size >= 26)) {
-		msleep(30);
+		usleep_range(36000, 37000);
 	}
 
 	/* Send Not_Supported Message */
@@ -5116,7 +5127,7 @@ policy_state usbpd_policy_snk_send_not_supported(struct policy_data *policy)
 	if ((pd_data->protocol_rx.msg_header.extended)
 		&& (pd_data->protocol_rx.data_obj[0].extended_msg_header_type.chunked)
 		&& (pd_data->protocol_rx.data_obj[0].extended_msg_header_type.data_size >= 26)) {
-		msleep(30);
+		usleep_range(36000, 37000);
 	}
 
 	/* Send Not_Supported Message */
@@ -5289,6 +5300,55 @@ policy_state usbpd_policy_src_give_source_cap_ext(struct policy_data *policy)
 
 	policy->tx_data_obj[6].Source_Capabilities_Extended_Data_Block_Type7.Number_of_Batteries_Slots = 0x01;
 	policy->tx_data_obj[6].Source_Capabilities_Extended_Data_Block_Type7.SPR_Source_PDP_Rating = 0x02;
+
+	usbpd_send_msg(pd_data, &policy->tx_msg_header, policy->tx_data_obj);
+	policy->tx_msg_header.extended = 0;
+
+	ret = (power_role == USBPD_SOURCE) ? PE_SRC_Ready : PE_SNK_Ready;
+
+	return ret;
+}
+
+policy_state usbpd_policy_snk_give_sink_cap_ext(struct policy_data *policy)
+{
+	struct usbpd_data *pd_data = policy_to_usbpd(policy);
+	int i;
+	int data_role = 0;
+	int power_role = 0;
+	int ret = PE_SNK_Give_Sink_Cap_Ext;
+
+	/**********************************************
+	Actions on entry:
+	Get present extended source capabilities
+	from Device Policy ManagerSend Source_Capabilities_Extended message
+	(based on Device Policy Manager response)
+	**********************************************/
+
+	/* PD State Inform to AP */
+	dev_info(pd_data->dev, "%s\n", __func__);
+
+	PDIC_OPS_PARAM_FUNC(get_data_role, pd_data, &data_role);
+	PDIC_OPS_PARAM_FUNC(get_power_role, pd_data, &power_role);
+
+	/* Message Setting */
+	policy->tx_msg_header.msg_type = USBPD_Sink_Capabilities_Extended;
+	policy->tx_msg_header.port_data_role = data_role;
+	policy->tx_msg_header.port_power_role = power_role;
+	policy->tx_msg_header.num_data_objs = 7;
+	policy->tx_msg_header.extended = 1;
+
+	for (i = 0; i < 7; i++)
+		policy->tx_data_obj[i].object = 0;
+
+	policy->tx_data_obj[0].extended_msg_header_type.chunked = 1; //no unchunked
+	policy->tx_data_obj[0].extended_msg_header_type.data_size = 24;
+	policy->tx_data_obj[0].word[1] = SAMSUNG_VENDOR_ID;
+
+	policy->tx_data_obj[1].word[0] = 0x6860;
+
+	policy->tx_data_obj[2].byte[0] = 1;				// SKEDB Version
+	policy->tx_data_obj[4].byte[2] = 1;				// BatteryInfo, Fix1 Swap0
+	policy->tx_data_obj[4].byte[3] = (1<<0) | (1<<1) | (1<<3);	// SinkModes Version
 
 	usbpd_send_msg(pd_data, &policy->tx_msg_header, policy->tx_data_obj);
 	policy->tx_msg_header.extended = 0;
@@ -5837,18 +5897,20 @@ policy_state usbpd_policy_give_manufacturer_info(struct policy_data *policy)
 		policy->tx_data_obj[i].object = 0;
 
 	policy->tx_data_obj[0].extended_msg_header_type.chunked = 1; //no unchunked
-	policy->tx_data_obj[0].extended_msg_header_type.data_size = 18;
 
 	policy->tx_data_obj[0].Manufacturer_Info1.VID = 0x0000;
 	policy->tx_data_obj[1].Manufacturer_Info2.PID = 0x0000;
 
 	if (policy->rx_data_obj[0].byte[2] == 0) { //Port/Cable Plug
+		policy->tx_data_obj[0].extended_msg_header_type.data_size = 6;
 		policy->tx_data_obj[1].Manufacturer_Info2.Manufacturer_String1 = '0';
 		policy->tx_data_obj[1].Manufacturer_Info2.Manufacturer_String2 = '\0';
 	} else if (policy->rx_data_obj[0].byte[2] == 1 && policy->rx_data_obj[0].byte[3] == 0) {
+		policy->tx_data_obj[0].extended_msg_header_type.data_size = 6;
 		policy->tx_data_obj[1].Manufacturer_Info2.Manufacturer_String1 = '0';
 		policy->tx_data_obj[1].Manufacturer_Info2.Manufacturer_String2 = '\0';
 	} else {
+		policy->tx_data_obj[0].extended_msg_header_type.data_size = 18;
 		policy->tx_data_obj[0].Manufacturer_Info1.VID = 0xFFFF;
 		policy->tx_data_obj[1].Manufacturer_Info2.PID = 0x0000;
 
@@ -6689,6 +6751,9 @@ void usbpd_policy_work(struct work_struct *work)
 			break;
 		case PE_SRC_Give_Source_Cap_Ext:
 			next_state = usbpd_policy_src_give_source_cap_ext(policy);
+			break;
+		case PE_SNK_Give_Sink_Cap_Ext:
+			next_state = usbpd_policy_snk_give_sink_cap_ext(policy);
 			break;
 		case PE_SNK_Get_Source_Status:
 			next_state = usbpd_policy_snk_get_source_status(policy);

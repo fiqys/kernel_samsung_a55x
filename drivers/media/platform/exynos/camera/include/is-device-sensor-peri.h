@@ -96,6 +96,7 @@ struct is_cis {
 	struct is_ixc_ops		*ixc_ops;
 	enum otf_input_order		bayer_order;
 	u32				aperture_num;
+	u32				orientation;
 	bool				use_dgain;
 	bool				hdr_ctrl_by_again;
 	bool				use_total_gain;

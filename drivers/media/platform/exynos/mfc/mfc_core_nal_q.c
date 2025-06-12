@@ -2485,6 +2485,15 @@ static void __mfc_core_nal_q_handle_released_buf(struct mfc_core *core, struct m
 				dec->refcnt++;
 				mfc_ctx_debug(3, "[NALQ][REFINFO] Dqueued DPB[%d] released fd: %d\n",
 						i, dec->dpb[i].fd[0]);
+
+				if (dec->dpb[i].new_fd != -1) {
+					dec->ref_buf[dec->refcnt].fd[0] = dec->dpb[i].new_fd;
+					dec->refcnt++;
+					dec->dpb[i].new_fd = -1;
+					mfc_ctx_debug(3, "[NALQ][REFINFO] Dqueued DPB[%d] released fd: %d\n",
+							i, dec->dpb[i].fd[0]);
+				}
+
 				/*
 				 * Except queued buffer,
 				 * the released DPB is deleted from dpb_table

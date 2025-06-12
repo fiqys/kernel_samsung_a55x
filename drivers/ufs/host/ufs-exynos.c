@@ -2681,6 +2681,9 @@ exynos_ufs_sysfs_ufs_eom_show(struct exynos_ufs *ufs, char *buf,
 	p = ufs->cal_param.eom[ufs->params[UFS_S_PARAM_LANE]];
 	p += ufs->params[UFS_S_PARAM_EOM_OFS];
 
+	if (!p)
+		return 0;
+
 	for (i = 0; i < EOM_DEF_VREF_MAX; i++) {
 		len += snprintf(buf + len, PAGE_SIZE, "%u %u %u\n", p->v_phase,
 				p->v_vref, p->v_err);

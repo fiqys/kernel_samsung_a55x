@@ -356,6 +356,9 @@ static int pktproc_fill_data_addr(struct pktproc_queue *q)
 	pp_debug("Q%d:%d/%d/%d Space:%d\n",
 		q->q_idx, fore, *q->rear_ptr, q->done_ptr, space);
 
+	if (!(q->manager->data_pool->page_alloc_complete))
+		cpif_page_pool_continue(NETRX_POOL_PAGE_SIZE, q->manager->data_pool);
+
 	for (i = 0; i < space; i++) {
 		struct cpif_addr_pair *addrpair = cpif_map_rx_buf(q->manager, fore);
 
@@ -1678,6 +1681,9 @@ int pktproc_init(struct pktproc_adaptor *ppa)
 #if IS_ENABLED(CONFIG_LINK_DEVICE_PCIE_IOMMU)
 			cpif_pcie_iommu_reset(q);
 #endif
+			if (q->manager && !(q->manager->data_pool->page_alloc_complete))
+				cpif_page_pool_continue(NETRX_POOL_PAGE_SIZE, q->manager->data_pool);
+
 			if (pktproc_check_active(q->ppa, q->q_idx))
 				q->clear_data_addr(q);
 			if (q->manager)

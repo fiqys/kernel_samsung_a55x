@@ -2470,6 +2470,12 @@ int amdgpu_vm_bo_clear_mappings(struct amdgpu_device *adev,
 		kfree(after);
 	}
 
+	r = amdgpu_vm_bo_update_mapping(adev, adev, vm, false, false,
+                vm->root.base.bo->tbo.base.resv, saddr,
+                eaddr, 0, 0, NULL, NULL, NULL);
+	if (r)
+		return r;
+
 	return 0;
 }
 

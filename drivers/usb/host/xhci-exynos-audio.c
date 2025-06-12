@@ -592,15 +592,10 @@ static struct xhci_segment *xhci_segment_alloc_uram_ep(struct xhci_hcd *xhci,
 			dma = EXYNOS_URAM_ISOC_OUT_RING_ADDR;
 		xhci_info(xhci, "First ISOC-OUT Ring is allocated at 0x%llx", dma);
 	} else if (endpoint_type == ISOC_IN_EP) {
-		if (!g_hwinfo->feedback)
-			seg->trbs = ioremap(EXYNOS_URAM_ISOC_IN_RING_ADDR, TRB_SEGMENT_SIZE);
-		else
 			seg->trbs = dma_pool_zalloc(xhci->segment_pool, flags, &dma);
 		if (!seg->trbs)
 			return NULL;
 
-		if (!g_hwinfo->feedback)
-			dma = EXYNOS_URAM_ISOC_IN_RING_ADDR;
 		xhci_info(xhci, "First ISOC-IN Ring is allocated at 0x%llx", dma);
 	} else {
 		xhci_err(xhci, "%s : Unexpected EP Type!\n", __func__);

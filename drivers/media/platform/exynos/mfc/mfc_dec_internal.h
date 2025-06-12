@@ -352,6 +352,24 @@ static struct v4l2_queryctrl dec_controls[] = {
 		.step = 1,
 		.default_value = 0,
 	},
+	{
+		.id = V4L2_CID_MPEG_MFC_HEIF_MODE,
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.name = "heif mode",
+		.minimum = 0,
+		.maximum = 1,
+		.step = 1,
+		.default_value = 0,
+	},
+	{
+		.id = V4L2_CID_MPEG_MFC_BATCH_DISABLE,
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.name = "batch disable",
+		.minimum = 0,
+		.maximum = 1,
+		.step = 1,
+		.default_value = 0,
+	},
 };
 
 #define DEC_NUM_CTRLS ARRAY_SIZE(dec_controls)

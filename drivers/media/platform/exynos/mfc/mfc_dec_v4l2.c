@@ -1590,6 +1590,14 @@ static int mfc_dec_s_ctrl(struct file *file, void *priv,
 		ctx->user_prio = ctrl->value;
 		mfc_rm_update_real_time(ctx);
 		break;
+	case V4L2_CID_MPEG_MFC_BATCH_DISABLE:
+		mfc_ctx_debug(2, "[BATCH] disable decoder batch mode: %d\n", ctrl->value);
+		ctx->dec_batch_disable = ctrl->value;
+		break;
+	case V4L2_CID_MPEG_MFC_HEIF_MODE:
+		mfc_ctx_debug(2, "[HEIF] heif mode: %d\n", ctrl->value);
+		ctx->is_heif_mode = ctrl->value;
+		break;
 	default:
 		list_for_each_entry(ctx_ctrl, &ctx->ctrls, list) {
 			if (!(ctx_ctrl->type & MFC_CTRL_TYPE_SET))

@@ -172,6 +172,7 @@ int exynos_dvfs_preset(struct devfreq *df)
 	int resume_ways = 0;
 #endif /* CONFIG_EXYNOS_SCI */
 
+	df->stats.last_update = get_jiffies_64();
 	resume_level = df->profile->max_state - 1;
 	for (i = 0; i < df->profile->max_state; i++) {
 		if (df->profile->freq_table[i] == df->resume_freq)
@@ -1666,6 +1667,9 @@ int gpu_dvfs_set_polling_interval(unsigned int value)
 
 	if (!df->governor)
 		return -EINVAL;
+
+	DRM_INFO("change gpu devfreq polling interval(%dms->%ums)",
+						df->profile->polling_ms, value);
 
 	df->governor->event_handler(df, DEVFREQ_GOV_UPDATE_INTERVAL, &value);
 

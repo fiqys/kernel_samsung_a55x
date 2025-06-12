@@ -20,6 +20,7 @@
 #include "is-video.h"
 #include "is-device-csi.h"
 #include "is-cis.h"
+#include "is-vendor.h"
 #if defined(CONFIG_CAMERA_USE_INTERNAL_MCU)
 #include "is-vendor-ois-internal-mcu.h"
 #endif
@@ -702,8 +703,8 @@ void is_sensor_actuator_active_off_work(struct work_struct *data)
 void is_sensor_ois_set_init_work(struct work_struct *data)
 {
 	int ret = 0;
-	struct is_ois *ois;
-	struct is_device_sensor_peri *sensor_peri;
+	struct is_ois *ois = NULL;
+	struct is_device_sensor_peri *sensor_peri = NULL;
 
 	WARN_ON(!data);
 
@@ -713,6 +714,7 @@ void is_sensor_ois_set_init_work(struct work_struct *data)
 
 	sensor_peri = ois->sensor_peri;
 #if defined(CONFIG_CAMERA_USE_INTERNAL_MCU)
+	is_vendor_mcu_power_on_wait();
 	ret = CALL_OISOPS(sensor_peri->mcu->ois, ois_set_dev_ctrl, sensor_peri->subdev_mcu, 0);
 	if (ret < 0)
 		err("v4l2_subdev_call(ois_set_dev_ctrl) is fail(%d)", ret);

@@ -154,10 +154,13 @@ static int uaif1_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
 	struct snd_soc_component *component = NULL;
 #if IS_ENABLED(CONFIG_SND_SOC_CS35L45)
-	struct snd_soc_dai *dai;
 	struct snd_soc_dapm_context *dapm;
+#endif
+#if IS_ENABLED(CONFIG_SND_SOC_CS35L45) || IS_ENABLED(CONFIG_SND_SOC_TAS25XX)
+	struct snd_soc_dai *dai;
 	int i;
 #endif
+
 	if (!codec_dai)
 		return 0;
 
@@ -172,10 +175,12 @@ static int uaif1_init(struct snd_soc_pcm_runtime *rtd)
 #endif
 
 #if IS_ENABLED(CONFIG_SND_SOC_TAS25XX)
-	if (strstr(component->name, "tas25xx")) {
-		register_tas25xx_bigdata_cb(component);
-		register_tas25xx_cb_component(component);
-		tas25xx_register_i2c_error_callback(tas_i2c_fail_log);
+	for_each_rtd_codec_dais(rtd, i, dai) {
+		if (strstr(dai->component->name, "tas25xx")) {
+			register_tas25xx_bigdata_cb(component);
+			register_tas25xx_cb_component(component);
+			tas25xx_register_i2c_error_callback(tas_i2c_fail_log);
+		}
 	}
 #endif
 

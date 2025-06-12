@@ -11,6 +11,9 @@ CONFIG_S3C2410_BUILTIN_WATCHDOG=y
 # SensorHub
 CONFIG_SHUB_DEBUG=y
 
+# Battery driver
+CONFIG_ENG_BATTERY_CONCEPT=y
+
 #
 # please don't remove new line on this file
 #

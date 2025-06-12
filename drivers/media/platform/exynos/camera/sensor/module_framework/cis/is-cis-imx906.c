@@ -826,7 +826,7 @@ int cis_imx906_probe_i2c(struct i2c_client *client,
 	struct device_node *dnode = client->dev.of_node;
 	struct sensor_imx906_private_runtime *priv_runtime;
 
-	probe_info("%s started\n", __func__);
+	probe_info("%s started for IMX906\n", __func__);
 
 	ret = sensor_cis_probe(client, &(client->dev), &sensor_peri, I2C_TYPE);
 	if (ret) {

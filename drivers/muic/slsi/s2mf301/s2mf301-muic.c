@@ -64,6 +64,9 @@
 #if IS_ENABLED(CONFIG_BATTERY_SAMSUNG) && !defined(CONFIG_BATTERY_GKI)
 #include <linux/sec_batt.h>
 #endif
+#if IS_ENABLED(CONFIG_BATTERY_SAMSUNG)
+#include "../../../battery/common/sec_charging_common.h"
+#endif
 #include <linux/usb/typec/common/pdic_param.h>
 
 struct s2mf301_muic_data *static_data;
@@ -897,6 +900,30 @@ static int s2mf301_ops_get_sbu_ovp_state(void *mdata)
 
 	return (reg & 0xc0) ? true : false;
 }
+
+#if defined(CONFIG_S2MF301_TYPEC_WATER)
+static void s2mf301_ops_set_sbu_ovp_state(void *mdata, bool en)
+{
+	struct s2mf301_muic_data *muic_data = (struct s2mf301_muic_data *)mdata;
+	u8 reg_val1 = 0;
+	u8 reg_val2 = 0;
+
+	reg_val1 = s2mf301_i2c_read_byte(muic_data->i2c, S2MF301_REG_OVPSW_LDO);
+	reg_val1 &= ~(S2MF301_MUIC_OVPSW_LDO_MAN_GP1_OVP_OFFB_MASK);
+
+	reg_val2 = s2mf301_i2c_read_byte(muic_data->i2c, S2MF301_REG_TRIM_CHARGER_DET);
+	reg_val2 &= ~(S2MF301_MUIC_TRIM_CHARGER_DET_MAN_GP2_OVP_OFFB_MASK);
+
+	/* true: SBU OVP ON */
+	if (en) {
+		reg_val1 |= (1 << S2MF301_MUIC_OVPSW_LDO_MAN_GP1_OVP_OFFB_SHIFT);
+		reg_val2 |= (1 << S2MF301_MUIC_TRIM_CHARGER_DET_MAN_GP2_OVP_OFFB_SHIFT);
+	}
+
+	s2mf301_i2c_write_byte(muic_data->i2c, S2MF301_REG_OVPSW_LDO, reg_val1);
+	s2mf301_i2c_write_byte(muic_data->i2c, S2MF301_REG_TRIM_CHARGER_DET, reg_val2);
+}
+#endif
 
 static int s2mf301_ops_get_vbus_state(void *mdata)
 {
@@ -1760,8 +1787,13 @@ static irqreturn_t s2mf301_muic_vbus_on_isr(int irq, void *data)
 #endif
 
 #if IS_ENABLED(CONFIG_HICCUP_CHARGER)
-	if (!is_lpcharge_pdic_param() && muic_data->is_water_detected)
+	if (!is_lpcharge_pdic_param() && muic_data->is_water_detected) {
+		union power_supply_propval val;
+		val.intval = 1;
+
+		psy_do_property("usbpd-manager", set, POWER_SUPPLY_LSI_PROP_WATER_CHECK, val);
 		s2mf301_muic_set_hiccup_mode(muic_data, MUIC_ENABLE);
+	}
 #endif
 
 #if IS_ENABLED(CONFIG_VBUS_NOTIFIER)
@@ -1827,6 +1859,15 @@ static irqreturn_t s2mf301_muic_vbus_off_isr(int irq, void *data)
 		}
 	}
 
+#if IS_ENABLED(CONFIG_HICCUP_CHARGER)
+	if (!is_lpcharge_pdic_param() && muic_data->is_water_detected) {
+		union power_supply_propval val;
+		val.intval = 0;
+
+		psy_do_property("usbpd-manager", set, POWER_SUPPLY_LSI_PROP_WATER_CHECK, val);
+	}
+#endif
+
 	s2mf301_info("%s done(%s)\n", __func__, dev_to_str(sdata->attached_dev));
 
 	s2mf301_muic_vbus_onoff(muic_data);
@@ -1834,17 +1875,6 @@ static irqreturn_t s2mf301_muic_vbus_off_isr(int irq, void *data)
 	mutex_unlock(&muic_data->muic_mutex);
 
 	return IRQ_HANDLED;
-}
-
-static void s2mf301_muic_send_pm_rid_disabled(struct s2mf301_muic_data *muic_data)
-{
-	struct power_supply *psy_pm;
-	union power_supply_propval value;
-
-	psy_pm = power_supply_get_by_name("s2mf301-pmeter");
-
-	value.intval = 0;
-	power_supply_set_property(psy_pm, (enum power_supply_property)POWER_SUPPLY_LSI_PROP_RID_DISABLE, &value);
 }
 
 #if IS_ENABLED(CONFIG_MUIC_S2MF301_RID)
@@ -2195,6 +2225,9 @@ static void register_muic_ops(struct muic_ic_data *ic_data)
 	ic_data->m_ops.set_switch_to_usb = s2mf301_ops_com_to_usb;
 	ic_data->m_ops.set_chg_det = s2mf301_ops_set_chg_det;
 	ic_data->m_ops.set_bypass = s2mf301_ops_set_bypass;
+#if defined(CONFIG_S2MF301_TYPEC_WATER)
+	ic_data->m_ops.set_sbu_ovp_state = s2mf301_ops_set_sbu_ovp_state;
+#endif
 	ic_data->m_ops.set_water_state = s2mf301_ops_set_water_state;
 #if IS_ENABLED(CONFIG_HV_MUIC_S2MF301_AFC)
 	ic_data->m_ops.check_usb_killer = s2mf301_ops_check_usb_killer;
@@ -2356,11 +2389,12 @@ static int s2mf301_muic_probe(struct platform_device *pdev)
 		s2mf301_muic_rid_isr(muic_data);
 #endif
 	} else {
-		s2mf301_muic_send_pm_rid_disabled(muic_data);
 		s2mf301_muic_get_detect_info(muic_data);
 		s2mf301_muic_attach_isr(-1, muic_data);
 	}
-
+#if defined(CONFIG_S2MF301_TYPEC_WATER)
+	s2mf301_ops_set_sbu_ovp_state(muic_data, true);
+#endif
 	s2mf301_info("%s done\n", __func__);
 	return 0;
 

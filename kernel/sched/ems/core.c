@@ -1330,6 +1330,11 @@ static int normal_fit_cpus(struct tp_env *env)
 			cpumask_and(fit_cpus, fit_cpus, coregroup_cpus);
 			if (cpumask_weight(fit_cpus) == 1)
 				goto out;
+
+			/* avoid same cpu when cl_sync */
+			cpumask_clear_cpu(this_cpu, fit_cpus);
+			if (cpumask_weight(fit_cpus) == 1)
+				goto out;
 		}
 	}
 

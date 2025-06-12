@@ -388,6 +388,10 @@ struct scsc_bt_fw_log {
 	size_t                         fw_acl_read_len;
 	u8                             fw_acl_read_state;
 	bool                           observers_registered;
+	u32                            btlog_enables0_low;
+	u32                            btlog_enables0_high;
+	u32                            btlog_enables1_low;
+	u32                            btlog_enables1_high;
 };
 
 #define FW_READ_DISABLE                (0x00)

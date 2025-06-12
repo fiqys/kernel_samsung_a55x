@@ -767,6 +767,15 @@ MODULE_PARM_DESC(sws_quantum,
 		 "-1 : use default setting\n");
 module_param_named(sws_quantum, amdgpu_sws_quantum, int, 0444);
 
+/**
+ * DOC: sgpu_devfreq_polling_ms (int)
+ * Set sgpu devfreq polling_time in ms.
+ * The default value: 8
+ */
+int sgpu_devfreq_polling_ms = 8;
+MODULE_PARM_DESC(devfreq_polling_ms,
+		"Set sgpu devfreq polling_time in ms (default 8ms)\n");
+module_param_named(devfreq_polling_ms, sgpu_devfreq_polling_ms, int, 0444);
 
 static const struct pci_device_id pciidlist[] = {
 

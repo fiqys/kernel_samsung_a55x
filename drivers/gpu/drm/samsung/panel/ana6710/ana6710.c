@@ -558,18 +558,24 @@ int ana6710_maptbl_getidx_ffc(struct maptbl *tbl)
 int ana6710_get_cell_id(struct panel_device *panel, void *buf)
 {
 	u8 date[PANEL_DATE_LEN] = { 0, }, coordinate[4] = { 0, };
+	int ret;
 
 	if (panel == NULL) {
 		panel_err("panel is null\n");
 		return -EINVAL;
 	}
 
-	panel_resource_copy(panel, date, "date");
-	panel_resource_copy(panel, coordinate, "coordinate");
+	ret = panel_resource_copy(panel, date, "date");
+	ret |= panel_resource_copy(panel, coordinate, "coordinate");
+	if (ret < 0) {
+		panel_err("failed to copy resources\n");
+		return -ENODATA;
+	}
 
 	snprintf(buf, PAGE_SIZE, "%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X\n",
 		date[0], date[1], date[2], date[3], date[4], date[5], date[6],
 		coordinate[0], coordinate[1], coordinate[2], coordinate[3]);
+
 	return 0;
 }
 int ana6710_get_octa_id(struct panel_device *panel, void *buf)
@@ -578,13 +584,18 @@ int ana6710_get_octa_id(struct panel_device *panel, void *buf)
 	u8 cell_id[16], octa_id[PANEL_OCTA_ID_LEN] = { 0, };
 	int len = 0;
 	bool cell_id_exist = true;
+	int ret;
 
 	if (panel == NULL) {
 		panel_err("panel is null\n");
 		return -EINVAL;
 	}
 
-	panel_resource_copy(panel, octa_id, "octa_id");
+	ret = panel_resource_copy(panel, octa_id, "octa_id");
+	if (ret < 0) {
+		panel_err("failed to copy resources\n");
+		return -ENODATA;
+	}
 
 	site = (octa_id[0] >> 4) & 0x0F;
 	rework = octa_id[0] & 0x0F;
@@ -617,12 +628,17 @@ int ana6710_get_octa_id(struct panel_device *panel, void *buf)
 int ana6710_get_manufacture_code(struct panel_device *panel, void *buf)
 {
 	u8 code[5] = { 0, };
+	int ret;
 
 	if (panel == NULL) {
 		panel_err("panel is null\n");
 		return -EINVAL;
 	}
-	panel_resource_copy(panel, code, "code");
+	ret = panel_resource_copy(panel, code, "code");
+	if (ret < 0) {
+		panel_err("failed to copy resources\n");
+		return -ENODATA;
+	}
 
 	snprintf(buf, PAGE_SIZE, "%02X%02X%02X%02X%02X\n",
 		code[0], code[1], code[2], code[3], code[4]);
@@ -634,12 +650,18 @@ int ana6710_get_manufacture_date(struct panel_device *panel, void *buf)
 {
 	u16 year;
 	u8 month, day, hour, min, date[PANEL_DATE_LEN] = { 0, };
+	int ret;
 
 	if (panel == NULL) {
 		panel_err("panel is null\n");
 		return -EINVAL;
 	}
-	panel_resource_copy(panel, date, "date");
+	ret = panel_resource_copy(panel, date, "date");
+	if (ret < 0) {
+		panel_err("failed to copy resources\n");
+		return -ENODATA;
+	}
+
 
 	year = ((date[0] & 0xF0) >> 4) + 2011;
 	month = date[0] & 0xF;

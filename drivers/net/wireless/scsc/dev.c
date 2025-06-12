@@ -468,6 +468,7 @@ struct slsi_dev *slsi_dev_attach(struct device *dev, struct scsc_mx *core, struc
 	slsi_wake_lock_init(NULL, &sdev->wlan_wl_ma.ws, "wlan_ma");
 	slsi_wake_lock_init(NULL, &sdev->wlan_wl_roam.ws, "wlan_roam");
 	slsi_wake_lock_init(NULL, &sdev->wlan_wl_init.ws, "wlan_init");
+	slsi_wake_lock_init(NULL, &sdev->wlan_wl_tx_sched.ws, "wlan_tx_sched");
 #else
 	slsi_wake_lock_init(&sdev->wlan_wl, WAKE_LOCK_SUSPEND, "wlan");
 	slsi_wake_lock_init(&sdev->wlan_wl_mlme_evt, WAKE_LOCK_SUSPEND, "wlan_wl_mlme_evt");
@@ -475,6 +476,7 @@ struct slsi_dev *slsi_dev_attach(struct device *dev, struct scsc_mx *core, struc
 	slsi_wake_lock_init(&sdev->wlan_wl_ma, WAKE_LOCK_SUSPEND, "wlan_ma");
 	slsi_wake_lock_init(&sdev->wlan_wl_roam, WAKE_LOCK_SUSPEND, "wlan_roam");
 	slsi_wake_lock_init(&sdev->wlan_wl_init, WAKE_LOCK_SUSPEND, "wlan_init");
+	slsi_wake_lock_init(&sdev->wlan_wl_tx_sched, WAKE_LOCK_SUSPEND, "wlan_tx_sched");
 #endif
 
 	sdev->recovery_next_state = 0;
@@ -703,6 +705,7 @@ err_if:
 	slsi_wake_lock_destroy(&sdev->wlan_wl_ma);
 	slsi_wake_lock_destroy(&sdev->wlan_wl_roam);
 	slsi_wake_lock_destroy(&sdev->wlan_wl_init);
+	slsi_wake_lock_destroy(&sdev->wlan_wl_tx_sched);
 
 	slsi_cfg80211_free(sdev);
 	return NULL;
@@ -808,6 +811,7 @@ void slsi_dev_detach(struct slsi_dev *sdev)
 	slsi_wake_lock_destroy(&sdev->wlan_wl_ma);
 	slsi_wake_lock_destroy(&sdev->wlan_wl_roam);
 	slsi_wake_lock_destroy(&sdev->wlan_wl_init);
+	slsi_wake_lock_destroy(&sdev->wlan_wl_tx_sched);
 
 #ifdef CONFIG_SCSC_WLAN_TX_API
 	slsi_dev_detach_post(sdev);

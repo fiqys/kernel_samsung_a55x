@@ -29,6 +29,8 @@
 #include "esx/is-vendor-config_esx_v03.h"
 #elif defined(CONFIG_CAMERA_AAX_V55X)
 #include "aax_v55x/is-vendor-config_aax_v55x.h"
+#elif defined(CONFIG_CAMERA_MMY_V56X)
+#include "mmy_v56x/is-vendor-config_mmy_v56x.h"
 #else
 #include "aax_v55x/is-vendor-config_aax_v55x.h" /* Default */
 #endif

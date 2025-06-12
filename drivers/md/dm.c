@@ -1552,6 +1552,9 @@ static void __send_empty_flush(struct clone_info *ci)
 		atomic_add(ti->num_flush_bios, &ci->io->io_count);
 		bios = __send_duplicate_bios(ci, ti, ti->num_flush_bios, NULL);
 		atomic_sub(ti->num_flush_bios - bios, &ci->io->io_count);
+
+		if (test_bit(DMF_SEC_FLUSH_ONCE_SAME_RQ, &t->md->flags))
+			break;
 	}
 
 	/*

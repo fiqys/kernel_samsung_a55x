@@ -526,6 +526,59 @@ void usbpd_manager_pps_request_handler(struct work_struct *work)
 	usbpd_manager_select_pps(2, 5000, 3000);
 }
 
+void usbpd_manager_buck_off_clear_handler(struct work_struct *work)
+{
+	union power_supply_propval val;
+	struct usbpd_manager_data *manager =
+		container_of(work, struct usbpd_manager_data,
+				buck_off_clear_handler.work);
+	struct usbpd_data *pd_data = manager_to_usbpd(manager);
+
+	usbpd_info("%s: call buckoff W/A Clear\n", __func__);
+
+	val.intval = 0;
+	psy_do_property(pd_data->charger_name, set, POWER_SUPPLY_LSI_PROP_PD_SUPPORT, val);
+}
+
+void usbpd_manager_buck_off_handler(struct work_struct *work)
+{
+	union power_supply_propval val;
+	struct usbpd_manager_data *manager =
+		container_of(work, struct usbpd_manager_data,
+				buck_off_handler.work);
+	struct usbpd_data *pd_data = manager_to_usbpd(manager);
+#if IS_ENABLED(CONFIG_BATTERY_NOTIFIER)
+	PDIC_SINK_STATUS * pdic_sink_status = &pd_data->pd_noti.sink_status;
+#else
+	SEC_PD_SINK_STATUS * pdic_sink_status = &pd_data->pd_noti.sink_status;
+#endif
+
+	usbpd_info("%s: call buckoff W/A setting\n", __func__);
+
+	if (pdic_sink_status->power_list[1].max_current != 0) {
+		val.intval = 0;
+		psy_do_property(pd_data->charger_name, set, POWER_SUPPLY_LSI_PROP_PD_SUPPORT, val);
+	}
+
+	usleep_range(3000, 3100);
+
+	/*
+	 * if SrcCap changed, select 5V PDO
+	 * keep <2.5W after accept + tSrcTransition
+	 * EXT_PROP_SRCCAP + 0 = buck off
+	 */
+	val.intval = 0;
+	psy_do_property("battery", set, POWER_SUPPLY_EXT_PROP_SRCCAP, val);
+
+	msleep(500);
+
+	val.intval = 1;
+	psy_do_property(pd_data->charger_name, set, POWER_SUPPLY_LSI_PROP_PD_SUPPORT, val);
+
+	cancel_delayed_work(&manager->buck_off_clear_handler);
+	schedule_delayed_work(&manager->buck_off_clear_handler, msecs_to_jiffies(15000));
+}
+
 void usbpd_manager_restart_discover_msg(struct usbpd_data *pd_data)
 {
 	struct usbpd_manager_data *manager = &pd_data->manager;
@@ -1105,6 +1158,7 @@ int usbpd_manager_command_to_policy(struct device *dev,
 	*/
 	return 0;
 }
+EXPORT_SYMBOL(usbpd_manager_command_to_policy);
 
 void usbpd_manager_inform_event(struct usbpd_data *pd_data,
 		usbpd_manager_event_type event)
@@ -1388,6 +1442,18 @@ static int usbpd_manager_check_accessory(struct usbpd_manager_data *manager)
 	pdic_send_dock_uevent(vid, pid, acc_type);
 	return 1;
 }
+
+void usbpd_manager_set_analog_audio(struct usbpd_data *pd_data)
+{
+	struct usbpd_manager_data *manager = &pd_data->manager;
+
+	manager->Vendor_ID = 0;
+	manager->Product_ID = 0;
+	manager->acc_type = PDIC_DOCK_UNSUPPORTED_AUDIO;
+
+	usbpd_manager_check_accessory(manager);
+}
+EXPORT_SYMBOL(usbpd_manager_set_analog_audio);
 
 /* Ok : 0, NAK: -1 */
 int usbpd_manager_get_identity(struct usbpd_data *pd_data)
@@ -1730,6 +1796,9 @@ int usbpd_manager_evaluate_capability(struct usbpd_data *pd_data)
 	if (manager->first_noti_sent) {
 		if (src_cap_changed || ((available_pdo_num > 0) &&
 				 (pdic_sink_status->available_pdo_num != available_pdo_num))) {
+			schedule_delayed_work(&manager->buck_off_handler, 0);
+
+			pr_info("%s, SrcCap Changed, select 1st PDO(5V)\n", __func__);
 			policy->send_sink_cap = 1;
 			pdic_sink_status->selected_pdo_num = 1;
 			
@@ -1804,12 +1873,12 @@ int usbpd_manager_match_request(struct usbpd_data *pd_data)
 	giveback = pd_data->source_request_obj.request_data_object.give_back;
 
     /*src_max_current is already *10 value ex) src_max_current 500mA */
-	usbpd_info("Tx SourceCap Current : %dmA\n", src_max_current*10);
-	usbpd_info("Rx Request Current : %dmA\n", max_min*10);
+	pr_info("Tx SourceCap Current : %dmA\n", src_max_current*10);
+	pr_info("Rx Request Current : max(%d)mA, op(%d)mA\n", max_min*10, op*10);
 
 	policy->cap_mismatch = mismatch;
     /* Compare Pdo and Rdo */
-	if ((src_max_current >= op) && (giveback == 0) && (src_max_current >= max_min))
+	if ((src_max_current >= op) && (giveback == 0))
 		return 0;
 	else
 		return -1;
@@ -2281,7 +2350,10 @@ static int usbpd_manager_set_property(struct power_supply *psy,
 
 	switch ((int)psp) {
 	case POWER_SUPPLY_PROP_PRESENT:
-		PDIC_OPS_PARAM_FUNC(ops_set_clk_offset, pd_data, val->intval);
+		if (val->intval < 0 || val->intval > 10)
+			break;
+		pr_info("%s, cc_hiccup_delay set to %d sec\n", __func__, val->intval);
+		pd_data->cc_hiccup_delay = val->intval;
 		break;
 	case POWER_SUPPLY_PROP_ENERGY_NOW:
 		PDIC_OPS_PARAM_FUNC(energy_now, pd_data, val->intval);
@@ -2312,6 +2384,14 @@ static int usbpd_manager_set_property(struct power_supply *psy,
 			break;
 		case POWER_SUPPLY_LSI_PROP_PCP_CLK:
 			PDIC_OPS_PARAM_FUNC(set_pcp_clk, pd_data, val->intval);
+			break;
+		case POWER_SUPPLY_LSI_PROP_WATER_CHECK:
+			PDIC_OPS_PARAM_FUNC(ops_cc_hiccup, pd_data, val->intval);
+			break;
+		case POWER_SUPPLY_LSI_PROP_WATER_STATUS:
+			pdic_event_work(pd_data, PDIC_NOTIFY_DEV_MUIC,
+					PDIC_NOTIFY_ID_WATER_CABLE,
+					1, 0, 0);
 			break;
 		default:
 			break;
@@ -2438,6 +2518,8 @@ int usbpd_init_manager(struct usbpd_data *pd_data)
 	INIT_DELAYED_WORK(&manager->short_check_work, usbpd_manager_short_check_handler);
 	INIT_DELAYED_WORK(&manager->acc_detach_handler, usbpd_manager_acc_detach_handler);
 	INIT_DELAYED_WORK(&manager->pps_request_handler, usbpd_manager_pps_request_handler);
+	INIT_DELAYED_WORK(&manager->buck_off_clear_handler, usbpd_manager_buck_off_clear_handler);
+	INIT_DELAYED_WORK(&manager->buck_off_handler, usbpd_manager_buck_off_handler);
 
 	usbpd_info("%s done\n", __func__);
 	return ret;

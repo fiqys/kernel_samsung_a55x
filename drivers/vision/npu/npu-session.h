@@ -297,6 +297,7 @@ void npu_session_restart(void);
 struct nq_buffer *get_buffer_of_execution_info(struct npu_frame *frame);
 struct dsp_common_execute_info_v4 *get_execution_info_for_dsp(struct npu_frame *frame);
 int npu_session_queue_cancel(struct npu_queue *queue, struct npu_queue_list *incl, struct npu_queue_list *otcl);
+int npu_session_put_nw_req(struct npu_session *session, nw_cmd_e nw_cmd);
 
 #ifdef CONFIG_NPU_KUNIT_TEST
 #define dsp_exec_graph_info(x) do {} while(0)
