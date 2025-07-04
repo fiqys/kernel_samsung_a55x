@@ -18,12 +18,12 @@ int tas25xx_dc_work_func(struct tas25xx_priv *p_tas25xx, int chn);
 void tas_reload(struct tas25xx_priv *p_tas25xx, int chn);
 int tas25xx_set_power_state(struct tas25xx_priv *p_tas25xx,
 		enum tas_power_states_t state, uint32_t chbitmask);
-int tas25xx_iv_vbat_slot_config(struct tas25xx_priv *p_tas25xx,
-	int mn_slot_width);
 int tas25xx_set_bitwidth(struct tas25xx_priv *p_tas25xx,
 	int bitwidth, int stream);
+int tas25xx_set_rx_bitwidth(struct tas25xx_priv *p_tas25xx, int bitwidth);
+int tas25xx_set_tx_bitwidth(struct tas25xx_priv *p_tas25xx, int bitwidth);
 int tas25xx_set_dai_fmt_for_fmt(struct tas25xx_priv *p_tas25xx,
-	unsigned int fmt);
+	unsigned int fmt, uint32_t chmask);
 int tas25xx_set_tdm_rx_slot(struct tas25xx_priv *p_tas25xx,
 	int slots, int slot_width);
 int tas25xx_set_tdm_tx_slot(struct tas25xx_priv *p_tas25xx,
@@ -32,10 +32,8 @@ int tas25xx_set_tdm_tx_slot(struct tas25xx_priv *p_tas25xx,
 int tas25xx_change_book(struct tas25xx_priv *p_tas25xx,
 	int32_t chn, int book);
 
-#if IS_ENABLED(CONFIG_TAS25XX_IRQ_BD)
 void tas25xx_log_interrupt_stats(struct tas25xx_priv *p_tas25xx);
 void tas25xx_clear_interrupt_stats(struct tas25xx_priv *p_tas25xx);
-#endif /* CONFIG_TAS25XX_IRQ_BD */
 
 int tas25xx_get_drv_channel_opmode(void);
 

@@ -1150,10 +1150,6 @@ void vts_dbg_dump_fw_gpr(struct device *dev, struct vts_data *data, unsigned int
 			break;
 		}
 
-		if (p_fw_dump->sram_magic) {
-			vts_dev_info(dev, "%s: already dump\n", __func__);
-			break;
-		}
 #if defined(CONFIG_SOC_S5E9935) || defined(CONFIG_SOC_S5E8835) || defined(CONFIG_SOC_S5E9945) || defined(CONFIG_SOC_S5E8845)
 		for (i = 0; i <= GPR_DUMP_CNT; i++) {
 			vts_dev_info(dev, "R%d: %x\n", i, readl(data->gpr_base + VTS_CM_R(i)));
@@ -1198,7 +1194,6 @@ void vts_dbg_dump_fw_gpr(struct device *dev, struct vts_data *data, unsigned int
 
 static void exynos_vts_panic_handler(void)
 {
-	static bool has_run;
 	struct vts_data *data = p_vts_data;
 	struct device *dev =
 		data ? (data->pdev ? &data->pdev->dev : NULL) : NULL;
@@ -1206,12 +1201,6 @@ static void exynos_vts_panic_handler(void)
 	vts_dev_dbg(dev, "%s\n", __func__);
 
 	if (vts_is_on() && dev) {
-		if (has_run) {
-			vts_dev_info(dev, "already dumped\n");
-			return;
-		}
-		has_run = true;
-
 		/* Dump VTS GPR register & SRAM */
 		vts_dbg_dump_fw_gpr(dev, data, KERNEL_PANIC_DUMP);
 	} else {

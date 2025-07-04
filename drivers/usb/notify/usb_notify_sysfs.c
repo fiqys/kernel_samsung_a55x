@@ -22,6 +22,7 @@
 #include <linux/usb_notify.h>
 #include <linux/string.h>
 #include "usb_notify_sysfs.h"
+#include <linux/version.h>
 
 #define MAX_STRING_LEN 20
 
@@ -82,6 +83,7 @@ usb_hw_param_print[USB_CCIC_HW_PARAM_MAX][MAX_HWPARAM_STRING] = {
 	{"CC_DRS"},
 	{"C_ARP"},
 	{"CC_UMVS"},
+	{"CC_STUCK"},
 	{"H_SB"},
 	{"H_OAD"},
 	{"CC_VER"},
@@ -1389,7 +1391,11 @@ static int create_usb_notify_class(void)
 {
 	if (!usb_notify_data.usb_notify_class) {
 		usb_notify_data.usb_notify_class
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
+			= class_create("usb_notify");
+#else
 			= class_create(THIS_MODULE, "usb_notify");
+#endif
 		if (IS_ERR(usb_notify_data.usb_notify_class))
 			return PTR_ERR(usb_notify_data.usb_notify_class);
 		atomic_set(&usb_notify_data.device_count, 0);
@@ -1430,6 +1436,7 @@ int usb_notify_dev_register(struct usb_notify_dev *udev)
 				MKDEV(0, udev->index));
 		return ret;
 	}
+	kobject_uevent(&udev->dev->kobj, KOBJ_CHANGE);
 
 	return 0;
 }

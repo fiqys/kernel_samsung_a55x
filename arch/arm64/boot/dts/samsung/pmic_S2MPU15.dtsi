@@ -8,13 +8,13 @@
 };
 #endif
 
-#if 1800000 && 3000000
+#if 3100000 && 3100000
 &l2_reg {
 	regulator-name = "vqmmc";
-	regulator-min-microvolt = <1800000>;
-	regulator-max-microvolt = <3000000>;
+	regulator-min-microvolt = <3100000>;
+	regulator-max-microvolt = <3100000>;
 	regulator-ramp-delay = <12000>;regulator-initial-mode = <3>;
-	/delete-property/ regulator-always-on;
+	/delete-property/ regulator-always-on;/delete-property/ regulator-boot-on;
 };
 #endif
 
@@ -258,11 +258,11 @@
 };
 #endif
 
-#if 1200000 && 1200000
+#if 0 && 0
 &l27_reg {
-	regulator-name = "VDDD_MACRO_1P2";
-	regulator-min-microvolt = <1200000>;
-	regulator-max-microvolt = <1200000>;
+	regulator-name = "vdd_ldo27";
+	regulator-min-microvolt = <0>;
+	regulator-max-microvolt = <0>;
 	 
 	
 };
@@ -318,11 +318,11 @@
 };
 #endif
 
-#if 0 && 0
+#if 3100000 && 3100000
 &l33_reg {
-	regulator-name = "vdd_ldo33";
-	regulator-min-microvolt = <0>;
-	regulator-max-microvolt = <0>;
+	regulator-name = "VDD_MOTOR_3P3";
+	regulator-min-microvolt = <3100000>;
+	regulator-max-microvolt = <3100000>;
 	 
 	
 };
@@ -349,6 +349,22 @@
 #endif
 
 
-/* /home/dpi/qb5_8815/workspace/P4_1716/android/kernel/kmodule/pmic/slsi/S2MPU15/dts/pmic_S2MPU15.a55x.dtsi */
+/* /home/dpi/qb5_8814/workspace/P4_1716/android/kernel/kmodule/pmic/slsi/S2MPU15/dts/pmic_S2MPU15.m56x.dtsi */
+&b_sr1_reg {
+	regulator-min-microvolt = <837500>;
+	regulator-max-microvolt = <837500>;
+};
+
+&b_sr2_reg {
+	regulator-min-microvolt = <975000>;
+	regulator-max-microvolt = <975000>;
+};
+
+&b_sr3_reg {
+	regulator-min-microvolt = <1300000>;
+	regulator-max-microvolt = <1300000>;
+};
+
 /delete-node/ &l19_reg;
 /delete-node/ &l21_reg;
+/delete-node/ &l27_reg;

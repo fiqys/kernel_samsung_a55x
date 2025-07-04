@@ -537,7 +537,9 @@ typedef enum usbpd_manager_command {
 	MANAGER_REQ_UVDM_SEND_MESSAGE		= 1 << 16,
 	MANAGER_REQ_UVDM_RECEIVE_MESSAGE	= 1 << 17,
 	MANAGER_REQ_GET_SRC_CAP			= 1 << 18,
-	MANAGER_REQ_SOFT_RESET			= 1 << 19,
+	MANAGER_REQ_ERROR_RECOVERY		= 1 << 19,
+	MANAGER_REQ_SOFT_RESET			= 1 << 20,
+	MANAGER_REQ_GET_SRC_CAP_EXT		= 1 << 21,
 } usbpd_manager_command_type;
 
 typedef enum usbpd_manager_event {
@@ -564,6 +566,7 @@ typedef enum usbpd_manager_event {
 	MANAGER_SEND_PR_SWAP	= 20,
 	MANAGER_SEND_DR_SWAP	= 21,
 	MANAGER_CAP_MISMATCH	= 22,
+	MANAGER_GET_SRC_CAP_EXT	= 23,
 } usbpd_manager_event_type;
 
 enum usbpd_msg_status {
@@ -798,6 +801,7 @@ typedef struct usbpd_phy_ops {
 	void    (*soft_reset)(void *);
 	int    (*set_power_role)(void *, int);
 	int    (*get_power_role)(void *, int *);
+	void	(*check_hardreset)(void *);
 	int    (*set_data_role)(void *, int);
 	int    (*get_data_role)(void *, int *);
 	int    (*set_vconn_source)(void *, int);
@@ -871,6 +875,12 @@ typedef struct usbpd_phy_ops {
 	void	(*ops_check_pps_irq_tx_req)(void *);
 	void	(*ops_check_pps_irq)(void *, int);
 	void	(*ops_manual_retry)(void *, int);
+#if IS_ENABLED(CONFIG_S2M_PDIC_DP_SUPPORT)
+	void	(*ops_disable_water)(void *, int);
+	void	(*ops_set_fac_sbu)(void *, int);
+	void	(*ops_get_fac_sbu)(void *, int*, int*);
+	void	(*ops_set_vctrl_otg)(void *, int);
+#endif
 } usbpd_phy_ops_type;
 
 struct policy_data {
@@ -879,6 +889,7 @@ struct policy_data {
 	msg_header_type		rx_msg_header;
 	data_obj_type           tx_data_obj[USBPD_MAX_COUNT_MSG_OBJECT];
 	data_obj_type		rx_data_obj[USBPD_MAX_COUNT_MSG_OBJECT];
+	data_obj_type		rx_dp_vdm[USBPD_MAX_COUNT_MSG_OBJECT];
 	bool			rx_hardreset;
 	bool			rx_softreset;
 	bool			plug;
@@ -896,6 +907,7 @@ struct policy_data {
 	bool			got_pps_apdo;
 	bool			not_support_svid_ack;
 	bool			need_check_pps_clk;
+	bool			get_src_cap_ext;
 	int				selected_pdo_type;
 	int				selected_pdo_num;
 	int				requested_pdo_type;
@@ -977,6 +989,14 @@ struct usbpd_manager_data {
 	uint16_t SVID_0;
 	uint16_t SVID_1;
 	uint16_t Standard_Vendor_ID;
+
+	int hpd_state;
+	int hpd_irq;
+	int dp_selected_pin;
+	bool is_dp_selected;
+	bool multi_function_preferred;
+	int pin_assignment;
+	bool dp_attached;
 
 	struct mutex vdm_mutex;
 	struct mutex pdo_mutex;
@@ -1070,10 +1090,17 @@ struct usbpd_data {
 #if IS_ENABLED(CONFIG_IF_CB_MANAGER)
 	struct usbpd_dev usbpd_d;
 	struct if_cb_manager *man;
+
+	wait_queue_head_t host_turn_on_wait_q;
+	int host_turn_on_event;
+	int host_turn_on_wait_time;
+	int detach_done_wait;
+	int wait_entermode;
 #endif
 	int pps_pd;
 	int is_manual_retry;
 	int cc_hiccup_delay;
+	bool hardreset_flag;
 };
 
 static inline struct usbpd_data *protocol_rx_to_usbpd(struct protocol_data *rx)
@@ -1121,7 +1148,11 @@ extern int usbpd_manager_get_identity(struct usbpd_data *);
 extern int usbpd_manager_get_svids(struct usbpd_data *);
 extern int usbpd_manager_get_modes(struct usbpd_data *);
 extern int usbpd_manager_enter_mode(struct usbpd_data *);
+extern void usbpd_manager_select_dp_pin(struct usbpd_data *pd_data);
 extern int usbpd_manager_exit_mode(struct usbpd_data *, unsigned mode);
+extern void usbpd_manager_dp_status_update(struct usbpd_data *pd_data);
+extern void usbpd_manager_dp_configure(struct usbpd_data *pd_data);
+extern void usbpd_manager_dp_hpd(struct usbpd_data *pd_data);
 extern void usbpd_manager_inform_event(struct usbpd_data *,
 		usbpd_manager_event_type);
 extern int usbpd_manager_evaluate_capability(struct usbpd_data *);
@@ -1140,6 +1171,7 @@ extern int usbpd_manager_command_to_policy(struct device *dev, usbpd_manager_com
 extern void usbpd_manager_restart_discover_msg(struct usbpd_data *pd_data);
 extern int usbpd_manager_psy_init(struct usbpd_data *_data, struct device *parent);
 extern void usbpd_manager_vbus_turn_on_ctrl(void *_data, bool enbale);
+extern void usbpd_manager_get_src_cap_ext(struct usbpd_data *pd_data, int attach);
 extern void init_source_cap_data(struct usbpd_manager_data *_data);
 extern void usbpd_policy_work(struct work_struct *);
 extern void usbpd_protocol_tx(struct usbpd_data *);

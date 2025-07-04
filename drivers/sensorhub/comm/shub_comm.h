@@ -37,6 +37,7 @@ struct shub_msg {
 #define SHUB_MSG_BUFFER_SIZE	(SHUB_CMD_SIZE - SHUB_MSG_HEADER_SIZE)
 
 int shub_send_command(u8 cmd, u8 type, u8 subcmd, char *send_buf, int send_buf_len);
+int shub_send_command_quitely(u8 cmd, u8 type, u8 subcmd, char *send_buf, int send_buf_len);
 int shub_send_command_wait(u8 cmd, u8 type, u8 subcmd, int timeout, char *send_buf, int send_buf_len,
 			   char **receive_buf, int *receive_buf_len, bool reset);
 void handle_packet(char *packet, int packet_size);

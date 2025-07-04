@@ -38,6 +38,7 @@ typedef struct star_dev_s {
 	int (*power_on)(void);
 	int (*power_off)(void);
 	int (*reset)(void);
+	int (*force_off)(void);
 } star_dev_t;
 
 typedef struct sec_star_s {

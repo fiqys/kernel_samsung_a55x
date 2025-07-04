@@ -18,16 +18,8 @@ snd-soc-tas25xx-objs += algo/src/tas25xx-algo-intf.o \
 	bigdata_tas_sysfs_cb.o
 endif
 
-ifneq ($(CONFIG_PLATFORM_MTK),)
-snd-soc-tas25xx-objs += algo/platform/mtk/tas25xx-mtk-wrapper.o
-endif
-
 ifneq ($(CONFIG_TAS25XX_MISC),)
 snd-soc-tas25xx-objs += src/tas25xx-misc.o
-endif
-
-ifneq ($(CONFIG_PLATFORM_QCOM),)
-snd-soc-tas25xx-objs += algo/platform/qcom/tas25xx-algo-qdsp-intf.o
 endif
 
 ifneq ($(CONFIG_TISA_KBIN_INTF),)

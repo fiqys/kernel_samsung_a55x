@@ -61,7 +61,9 @@ int repeater_core_register(struct repeater_data *_data)
 		return -ENODATA;
 
 	gdata = _data;
-
+#if	IS_ENABLED(CONFIG_PHY_SUPPORT_SEC_REPEATER_CB)
+	register_repeater_enable(repeater_enable);
+#endif
 	return ret;
 }
 EXPORT_SYMBOL_GPL(repeater_core_register);

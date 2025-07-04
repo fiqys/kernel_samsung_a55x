@@ -105,6 +105,16 @@ static int s2mf301_muic_rid_isr(void *_data);
 	(s2mf301_info("%s, %s in NULL\n", __func__, #func), -1))
 #endif
 
+static int muic_psy_get_property(struct power_supply *psy,
+			    enum power_supply_property psp,
+			    union power_supply_propval *val)
+{
+	if (!psy)
+		return -ENODEV;
+
+	return psy->desc->get_property(psy, psp, val);
+}
+
 #ifndef CONFIG_HV_MUIC_S2MF301_AFC
 int muic_afc_set_voltage(int vol)
 {
@@ -317,6 +327,10 @@ int s2mf301_i2c_write_byte(struct i2c_client *client, u8 command, u8 value)
 	ret_w = s2mf301_write_reg(client, command, value);
 	while (ret_w < 0) {
 		s2mf301_info("failed to write reg(0x%x) retry(%d)\n", command, retry);
+		if (retry > 10) {
+			s2mf301_err("%s  retry failed!!\n", __func__);
+			break;
+		}
 		ret_r = s2mf301_read_reg(client, command, &written);
 		if (ret_r < 0)
 			s2mf301_err("%s reg(0x%x)\n", __func__, command);
@@ -373,6 +387,23 @@ static int _s2mf301_i2c_update_bit(struct i2c_client *i2c,
 }
 
 #if defined(CONFIG_MUIC_SUPPORT_PRSWAP)
+static void _s2mf301_muic_gatesw_control(struct s2mf301_muic_data *muic_data, int en)
+{
+	struct i2c_client *i2c = muic_data->i2c;
+	u8 reg;
+
+	reg = s2mf301_i2c_read_byte(i2c, S2MF301_REG_MANUAL_SW_CTRL);
+	if (en) {
+		reg |= S2MF301_MUIC_MUIC_SW_CTRL_GATESW_ON_MASK;
+	} else {
+		reg &= ~S2MF301_MUIC_MUIC_SW_CTRL_GATESW_ON_MASK;
+	}
+	s2mf301_i2c_write_byte(i2c, S2MF301_REG_MANUAL_SW_CTRL, reg);
+
+	reg = s2mf301_i2c_read_byte(i2c, S2MF301_REG_MANUAL_SW_CTRL);
+	s2mf301_info("%s, reg=0x%x\n", __func__, reg);
+}
+
 static void _s2mf301_muic_set_chg_det(struct s2mf301_muic_data *muic_data,
 		bool enable)
 {
@@ -394,6 +425,7 @@ static void _s2mf301_muic_set_chg_det(struct s2mf301_muic_data *muic_data,
 	if (w_val != r_val) {
 		s2mf301_info("%s en(%d)\n", __func__, enable);
 		s2mf301_i2c_write_byte(i2c, S2MF301_REG_MUIC_ETC, w_val);
+		_s2mf301_muic_gatesw_control(muic_data, enable);
 	}
 }
 #endif
@@ -913,16 +945,16 @@ static void s2mf301_ops_set_sbu_ovp_state(void *mdata, bool en)
 
 	reg_val2 = s2mf301_i2c_read_byte(muic_data->i2c, S2MF301_REG_TRIM_CHARGER_DET);
 	reg_val2 &= ~(S2MF301_MUIC_TRIM_CHARGER_DET_MAN_GP2_OVP_OFFB_MASK);
-
+	
 	/* true: SBU OVP ON */
-	if (en) {
+	if(en) {
 		reg_val1 |= (1 << S2MF301_MUIC_OVPSW_LDO_MAN_GP1_OVP_OFFB_SHIFT);
 		reg_val2 |= (1 << S2MF301_MUIC_TRIM_CHARGER_DET_MAN_GP2_OVP_OFFB_SHIFT);
 	}
 
 	s2mf301_i2c_write_byte(muic_data->i2c, S2MF301_REG_OVPSW_LDO, reg_val1);
 	s2mf301_i2c_write_byte(muic_data->i2c, S2MF301_REG_TRIM_CHARGER_DET, reg_val2);
-}
+}  
 #endif
 
 static int s2mf301_ops_get_vbus_state(void *mdata)
@@ -1245,7 +1277,7 @@ static int s2mf301_muic_reg_init(struct s2mf301_muic_data *muic_data)
 
 	reg_val = s2mf301_i2c_read_byte(i2c, S2MF301_REG_TIMER_SET1);
 	reg_val &= ~S2MF301_MUIC_TIMER_SET1_DCDTMRSET_MASK;
-	reg_val |= S2MF301_MUIC_TIMER_SET1_DCDTMRSET_600MS;
+	reg_val |= S2MF301_MUIC_TIMER_SET1_DCDTMRSET_400MS;
 	s2mf301_i2c_write_byte(i2c, S2MF301_REG_TIMER_SET1, reg_val);
 
 	/* Set VDAT_REF 0.3V */
@@ -1299,6 +1331,7 @@ static int s2mf301_muic_detect_dev_bc1p2(struct s2mf301_muic_data *muic_data)
 #if defined(CONFIG_MUIC_HV_SUPPORT_POGO_DOCK)
 	struct muic_ic_data *ic_data = (struct muic_ic_data *)sdata->ic_data;
 	int vbus_value = 0;
+	int pogo_dock_int_active;
 #endif
 
 #if defined(CONFIG_USB_HW_PARAM)
@@ -1308,8 +1341,9 @@ static int s2mf301_muic_detect_dev_bc1p2(struct s2mf301_muic_data *muic_data)
 	muic_data->new_dev = ATTACHED_DEV_UNKNOWN_MUIC;
 
 #if defined(CONFIG_MUIC_HV_SUPPORT_POGO_DOCK)
+	pogo_dock_int_active = !!(muic_data->pogo_dock_int_active_value);
 	if (gpio_is_valid(muic_data->gpio_dock)) {
-		if (gpio_get_value(muic_data->gpio_dock) == 0) {
+		if (gpio_get_value(muic_data->gpio_dock) == pogo_dock_int_active) {
 			usleep_range(35000, 36000);
 			MUIC_PDATA_FUNC(ic_data->m_ops.get_vbus_value, ic_data->drv_data, &vbus_value);
 			if (vbus_value == 5) {
@@ -1882,12 +1916,19 @@ static void s2mf301_muic_get_pm_ops(struct s2mf301_muic_data *muic_data, struct 
 {
 	union power_supply_propval value;
 	struct s2mf301_pm_rid_ops *p_pm_rid_ops;
-
-	s2mf301_info("%s, get ops success\n", __func__);
+	int ret = 0;
 
 	muic_data->rid_isr = s2mf301_muic_rid_isr;
 	value.strval = (const char *)muic_data;
-	power_supply_get_property(psy, (enum power_supply_property)POWER_SUPPLY_LSI_PROP_RID_OPS, &value);
+	ret = muic_psy_get_property(psy,
+			(enum power_supply_property)POWER_SUPPLY_LSI_PROP_RID_OPS,
+			&value);
+	if (ret) {
+		pr_err("%s failed to get psy prop, ret=%d\n", __func__, ret);
+		return;
+	}
+
+	s2mf301_info("%s, get ops success\n", __func__);
 
 	muic_data->psy_pm = psy;
 
@@ -1904,12 +1945,19 @@ static void s2mf301_muic_get_top_ops(struct s2mf301_muic_data *muic_data, struct
 {
 	union power_supply_propval value;
 	struct s2mf301_top_rid_ops *p_top_rid_ops;
-
-	s2mf301_info("%s, get ops success\n", __func__);
+	int ret = 0;
 
 	muic_data->rid_isr = s2mf301_muic_rid_isr;
 	value.strval = (const char *)muic_data;
-	power_supply_get_property(psy, (enum power_supply_property)POWER_SUPPLY_LSI_PROP_RID_OPS, &value);
+	ret = muic_psy_get_property(psy,
+			(enum power_supply_property)POWER_SUPPLY_LSI_PROP_RID_OPS,
+			&value);
+	if (ret) {
+		pr_err("%s failed to get psy prop, ret=%d\n", __func__, ret);
+		return;
+	}
+
+	s2mf301_info("%s, get ops success\n", __func__);
 
 	muic_data->psy_top = psy;
 
@@ -1918,6 +1966,7 @@ static void s2mf301_muic_get_top_ops(struct s2mf301_muic_data *muic_data, struct
 	muic_data->top = p_top_rid_ops->_data;
 	muic_data->top_rid_ops.set_jig_on = p_top_rid_ops->set_jig_on;
 	muic_data->top_rid_ops.mask_rid_change = p_top_rid_ops->mask_rid_change;
+	muic_data->top_rid_ops.get_dummy_rid = p_top_rid_ops->get_dummy_rid;
 }
 
 static void s2mf301_muic_get_pm_ops_work(struct work_struct *work)
@@ -2003,9 +2052,9 @@ static int s2mf301_muic_rid_isr(void *_data)
 	}
 
 	mutex_lock(&muic_data->muic_mutex);
-	__pm_stay_awake(muic_data->muic_ws);
+	pm_wakeup_ws_event(muic_data->muic_ws, 1000, false);
 	
-	s2mf301_info("%s, wait adc check time 300ms\n", __func__);
+	s2mf301_info("%s, wait adc check time 300ms after wakelock 1s\n", __func__);
 	msleep(300);
 
 	muic_data->adc = _s2mf301_muic_get_rid_adc(muic_data);
@@ -2021,7 +2070,7 @@ static int s2mf301_muic_rid_isr(void *_data)
 		s2mf301_muic_detect_dev_rid_array(muic_data);
 		s2mf301_muic_handle_attached_dev(muic_data);
 	}
-	__pm_relax(muic_data->muic_ws);
+
 	mutex_unlock(&muic_data->muic_mutex);
 
 	return IRQ_HANDLED;
@@ -2092,12 +2141,15 @@ static void s2mf301_muic_free_irqs(struct s2mf301_muic_data *muic_data)
 static int of_s2mf301_muic_dt(struct device *dev,
 			      struct s2mf301_muic_data *muic_data)
 {
+#if !IS_ENABLED(CONFIG_MUIC_UART_SWITCH)	
 	struct muic_share_data *sdata = muic_data->sdata;
+#endif	
 	struct device_node *np, *np_muic;
 	int ret = 0;
 #if defined(CONFIG_MUIC_HV_SUPPORT_POGO_DOCK)
 	struct device_node *np_pdic;
 	int pogo_gpio;
+	bool pogo_dock_int_active_value;
 #endif
 
 	np = dev->parent->of_node;
@@ -2129,6 +2181,15 @@ static int of_s2mf301_muic_dt(struct device *dev,
 		s2mf301_err("%s : could not find pdic sub-node np_pdic\n", __func__);
 		return -EINVAL;
 	} else {
+		pogo_dock_int_active_value = of_property_read_bool(np_pdic, "pogo_dock_int_active_high");
+		if (pogo_dock_int_active_value) {
+			s2mf301_info("%s, pogo dock interrupt active high\n", __func__);
+			muic_data->pogo_dock_int_active_value = POGO_DOCK_INT_ACTIVE_HIGH;
+		} else {
+			s2mf301_info("%s, pogo dock interrupt active low\n", __func__);
+			muic_data->pogo_dock_int_active_value = POGO_DOCK_INT_ACTIVE_LOW;
+		}
+
 		pogo_gpio = of_get_named_gpio(np_pdic, "pogo_dock_int", 0);
 		muic_data->gpio_dock = pogo_gpio;
 		if (gpio_is_valid(muic_data->gpio_dock))
@@ -2147,11 +2208,7 @@ static int of_s2mf301_muic_dt(struct device *dev,
 #endif /* CONFIG_MUIC_HV_SUPPORT_POGO_DOCK */
 
 #if !IS_ENABLED(CONFIG_MUIC_UART_SWITCH)
-	if (of_gpio_count(np_muic) < 1) {
-		s2mf301_err("%s : could not find muic gpio\n", __func__);
-		sdata->gpio_uart_sel = -1;
-	} else
-		sdata->gpio_uart_sel = of_get_gpio(np_muic, 0);
+	sdata->gpio_uart_sel = of_get_named_gpio(np_muic, "gpios", 0);
 #else
 	muic_data->pdata->uart_addr =
 	    (const char *)of_get_property(np_muic, "muic,uart_addr", NULL);
@@ -2252,7 +2309,12 @@ static int s2mf301_muic_probe(struct platform_device *pdev)
 	struct muic_share_data *sdata;
 	struct muic_ic_data *ic_data;
 	int ret = 0;
-	u8 adc = 0;
+	u8 adc = 0, dummy_rid = 0;
+
+	if (power_supply_get_by_name("s2mf301-pmeter") == NULL) {
+		pr_info("%s, pmeter is not probed\n", __func__);
+		return -EPROBE_DEFER;
+	}
 
 	s2mf301_info("%s start\n", __func__);
 	muic_data = devm_kzalloc(&pdev->dev, sizeof(*muic_data), GFP_KERNEL);
@@ -2368,12 +2430,17 @@ static int s2mf301_muic_probe(struct platform_device *pdev)
 	}
 #endif
 	adc = _s2mf301_muic_get_rid_adc(muic_data);
-	s2mf301_info("%s rid adc=%02x\n", __func__, adc);
+	dummy_rid = TOP_RID_OPS_FUNC(get_dummy_rid);
+	s2mf301_info("%s rid adc=%02x, dummy_rid=%02x\n", __func__, adc, dummy_rid);
 #if IS_ENABLED(CONFIG_SEC_FACTORY)
 	if (IS_JIG_ADC(adc))
 		muic_if->opmode = OPMODE_MUIC;
-	else
-		_s2mf301_muic_control_rid_adc(muic_data, false);
+	else {
+		if (IS_JIG_ADC(dummy_rid))
+			muic_if->opmode = OPMODE_MUIC;
+		else
+			_s2mf301_muic_control_rid_adc(muic_data, false);
+	}
 #else
 	_s2mf301_muic_control_rid_adc(muic_data, false);
 	if (adc == ADC_GND) {
@@ -2386,7 +2453,31 @@ static int s2mf301_muic_probe(struct platform_device *pdev)
 
 	if (muic_if->opmode == OPMODE_MUIC) {
 #if IS_ENABLED(CONFIG_MUIC_S2MF301_RID)
-		s2mf301_muic_rid_isr(muic_data);
+		switch (dummy_rid) {
+		case ADC_JIG_UART_OFF:
+		case ADC_JIG_UART_ON:
+		case ADC_JIG_USB_ON:
+		case ADC_JIG_USB_OFF:
+			muic_data->adc = dummy_rid;
+			s2mf301_info("%s, dummy_rid is used!!\n", __func__);
+			if (!IS_JIG_ADC(_s2mf301_muic_get_rid_adc(muic_data)))
+					muic_data->adc = ADC_GND;
+			muic_data->vbvolt = sdata->vbus_state = _s2mf301_muic_get_vbus_state(muic_data);
+
+			s2mf301_info("%s Vbus(%s), rid_adc(%#x), Type(%s), opmode : %s\n", __func__,
+					(muic_data->vbvolt ? "High" : "Low"),
+					muic_data->adc, dev_to_str(sdata->attached_dev),
+					(muic_if->opmode ? "PDIC" : "MUIC"));
+			
+			s2mf301_muic_mask_rid_change(muic_data);
+			s2mf301_muic_detect_dev_rid_array(muic_data);
+			s2mf301_muic_handle_attached_dev(muic_data);
+			break;
+		default:
+			s2mf301_info("%s, dummy_rid is OPEN\n", __func__);
+			s2mf301_muic_rid_isr(muic_data);
+			break;
+		}
 #endif
 	} else {
 		s2mf301_muic_get_detect_info(muic_data);

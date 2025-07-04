@@ -24,8 +24,10 @@
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/completion.h>
-#include <linux/usb_notify.h>
 #include <linux/version.h>
+#if IS_ENABLED(CONFIG_USB_NOTIFIER)
+#include <linux/usb_notify.h>
+#endif
 
 #if IS_ENABLED(CONFIG_PDIC_NOTIFIER)
 #include <linux/usb/typec/slsi/common/usbpd_ext.h>
@@ -510,6 +512,7 @@ int typec_pr_set(const struct typec_capability *cap, enum typec_role power_role)
 {
 	struct usbpd_data *pd_data = container_of(cap, struct usbpd_data, typec_cap);
 #endif
+	int timeout = 0;
 #if defined(CONFIG_USB_HW_PARAM)
 	struct otg_notify *o_notify = get_otg_notify();
 
@@ -538,6 +541,18 @@ int typec_pr_set(const struct typec_capability *cap, enum typec_role power_role)
 		usbpd_info("%s : invalid power_role\n", __func__);
 		return -EINVAL;
 	}
+
+	reinit_completion(&pd_data->role_reverse_completion);
+	timeout =
+		wait_for_completion_timeout(&pd_data->role_reverse_completion,
+				msecs_to_jiffies
+				(DUAL_ROLE_SET_MODE_WAIT_MS));
+
+	if (!timeout) {
+		usbpd_err("%s: reverse failed\n", __func__);
+		return -EIO;
+	} else
+		usbpd_err("%s: reverse success\n", __func__);
 
 	return 0;
 }

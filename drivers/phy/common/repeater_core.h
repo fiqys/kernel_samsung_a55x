@@ -30,5 +30,8 @@ extern int repeater_enable(bool en);
 extern int eusb_repeater_set_bypass(bool en);
 extern int repeater_core_register(struct repeater_data *data);
 extern void repeater_core_unregister(void);
+#if	IS_ENABLED(CONFIG_PHY_SUPPORT_SEC_REPEATER_CB)
+extern int register_repeater_enable(int (*repeater_enable) (bool en));
+#endif
 
 #endif	/* __USB_REPEATER_H__ */

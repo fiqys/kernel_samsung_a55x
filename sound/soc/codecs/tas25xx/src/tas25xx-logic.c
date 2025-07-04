@@ -17,16 +17,13 @@
 #include <linux/power_supply.h>
 #include "../inc/tas25xx-logic.h"
 #include "../inc/tas25xx-device.h"
-#if IS_ENABLED(CONFIG_TAS25XX_ALGO)
 #include "../algo/inc/tas_smart_amp_v2.h"
 #include "../algo/inc/tas25xx-calib.h"
-#if IS_ENABLED(CONFIG_TISA_SYSFS_INTF)
-#include "../algo/src/tas25xx-sysfs-debugfs-utils.h"
-#endif
-#endif /* CONFIG_TAS25XX_ALGO*/
 #include "../inc/tas25xx-regmap.h"
 #include "../inc/tas25xx-regbin-parser.h"
+#include "../inc/tas25xx-ext.h"
 
+#define REF_TEMP_DEVICE_NAME "battery"
 #ifndef DEFAULT_AMBIENT_TEMP
 #define DEFAULT_AMBIENT_TEMP 20
 #endif
@@ -34,11 +31,24 @@
 /* 128 Register Map to be used during Register Dump*/
 #define REG_CAP_MAX	128
 
+static int tas25xx_iv_vbat_slot_config_for_ch(struct tas25xx_priv *p_tas25xx,
+	int mn_slot_width, int ch);
+
 const char *tas_power_states_str[] = {
 	"TAS_POWER_ACTIVE",
 	"TAS_POWER_MUTE",
 	"TAS_POWER_SHUTDOWN",
 };
+
+static inline uint32_t get_valid_channel_mask(struct tas25xx_priv *p_tas25xx, uint32_t chmask)
+{
+	uint32_t mask = 0;
+
+	if (p_tas25xx)
+		mask = (~p_tas25xx->amp_i2c_err & chmask) &
+				((1 << p_tas25xx->ch_count) - 1);
+	return mask;
+}
 
 static struct tas25xx_reg regs[REG_CAP_MAX] = {
 	{0,	0},	{1,	0},	{2,	0},	{3,	0},	{4,	0},
@@ -68,6 +78,20 @@ static struct tas25xx_reg regs[REG_CAP_MAX] = {
 	{120,	0},	{121,	0},	{122,	0},	{123,	0},	{124,	0},
 	{125,	0},	{126,	0},	{127,	0},
 };
+
+static void (*tas_amp_err_fptr)(int32_t i2c, int32_t err);
+
+void tas25xx_register_amp_error_callback(void (*amp_err_cb)(int32_t ch, int32_t err))
+{
+	tas_amp_err_fptr = amp_err_cb;
+}
+EXPORT_SYMBOL_GPL(tas25xx_register_amp_error_callback);
+
+static void tas25xx_post_amp_err_to_platform(int32_t i2c, int32_t err)
+{
+	if (tas_amp_err_fptr)
+		tas_amp_err_fptr(i2c, err);
+}
 
 int tas25xx_change_book(struct tas25xx_priv *p_tas25xx,
 	int32_t chn, int book)
@@ -103,7 +127,6 @@ int tas25xx_change_book(struct tas25xx_priv *p_tas25xx,
 
 	return ret;
 }
-
 
 /* Function to Dump Registers */
 void tas25xx_dump_regs(struct tas25xx_priv  *p_tas25xx, int chn)
@@ -153,12 +176,17 @@ static void tas25xx_hard_reset(struct tas25xx_priv  *p_tas25xx)
 	p_tas25xx->mn_err_code = 0;
 }
 
-int tas25xx_set_dai_fmt_for_fmt(struct tas25xx_priv *p_tas25xx, unsigned int fmt)
+int tas25xx_set_dai_fmt_for_fmt(struct tas25xx_priv *p_tas25xx, unsigned int fmt,
+	uint32_t chmask)
 {
-	int ret;
-	int i;
+	int ret = 0;
+	int i, valid_chmask, ch_count;
 	struct linux_platform *plat_data =
 		(struct linux_platform *) p_tas25xx->platform_data;
+
+	ch_count = p_tas25xx->ch_count;
+	/* check channels */
+	valid_chmask = get_valid_channel_mask(p_tas25xx, chmask);
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
 	case SND_SOC_DAIFMT_CBS_CFS:
@@ -170,51 +198,74 @@ int tas25xx_set_dai_fmt_for_fmt(struct tas25xx_priv *p_tas25xx, unsigned int fmt
 		break;
 	}
 
+	if (ret)
+		return ret;
+
 	switch (fmt & SND_SOC_DAIFMT_INV_MASK) {
 	case SND_SOC_DAIFMT_NB_NF:
 		dev_info(plat_data->dev, "INV format: NBNF\n");
-		for (i = 0; i < p_tas25xx->ch_count; i++) {
+		for (i = 0; i < ch_count; i++) {
+			if (!is_ch_in_mask(valid_chmask, i))
+				continue;
+
 			ret = tas25xx_set_fmt_inv(p_tas25xx, i, FMT_INV_NB_NF);
 			if (ret) {
 				dev_err(plat_data->dev,
 					"Error setting the format FMT_INV_NB_NF for ch=%d\n", i);
-				break;
+				set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
+				valid_chmask = get_valid_channel_mask(p_tas25xx, chmask);
+				ret = 0;
 			}
 		}
 		break;
 
 	case SND_SOC_DAIFMT_IB_NF:
 		dev_info(plat_data->dev, "INV format: IBNF\n");
-		for (i = 0; i < p_tas25xx->ch_count; i++) {
+		for (i = 0; i < ch_count; i++) {
+			if (!is_ch_in_mask(valid_chmask, i))
+				continue;
+
 			ret = tas25xx_set_fmt_inv(p_tas25xx, i, FMT_INV_IB_NF);
 			if (ret) {
 				dev_err(plat_data->dev,
 					"Error setting the format FMT_INV_IB_NF for ch=%d\n", i);
-				break;
+				set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
+				valid_chmask = get_valid_channel_mask(p_tas25xx, chmask);
+				ret = 0;
 			}
 		}
 		break;
 
 	case SND_SOC_DAIFMT_NB_IF:
 		dev_info(plat_data->dev, "INV format: NBIF\n");
-		for (i = 0; i < p_tas25xx->ch_count; i++) {
+		for (i = 0; i < ch_count; i++) {
+			if (!is_ch_in_mask(valid_chmask, i))
+				continue;
+
 			ret = tas25xx_set_fmt_inv(p_tas25xx, i, FMT_INV_NB_IF);
 			if (ret) {
 				dev_err(plat_data->dev,
 					"Error setting the format FMT_INV_NB_IF for ch=%d\n", i);
-				break;
+				set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
+				valid_chmask = get_valid_channel_mask(p_tas25xx, chmask);
+				ret = 0;
 			}
 		}
 		break;
 
 	case SND_SOC_DAIFMT_IB_IF:
 		dev_info(plat_data->dev, "INV format: IBIF\n");
-		for (i = 0; i < p_tas25xx->ch_count; i++) {
+		for (i = 0; i < ch_count; i++) {
+			if (!is_ch_in_mask(valid_chmask, i))
+				continue;
+
 			ret = tas25xx_set_fmt_inv(p_tas25xx, i, FMT_INV_IB_IF);
 			if (ret) {
 				dev_err(plat_data->dev,
 					"Error setting the format FMT_INV_IB_IF for ch=%d\n", i);
-				break;
+				set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
+				valid_chmask = get_valid_channel_mask(p_tas25xx, chmask);
+				ret = 0;
 			}
 		}
 		break;
@@ -231,12 +282,17 @@ int tas25xx_set_dai_fmt_for_fmt(struct tas25xx_priv *p_tas25xx, unsigned int fmt
 	case (SND_SOC_DAIFMT_I2S):
 		dev_info(plat_data->dev,
 			"SND_SOC_DAIFMT_I2S tdm_rx_start_slot = 1\n");
-		for (i = 0; i < p_tas25xx->ch_count; i++) {
+		for (i = 0; i < ch_count; i++) {
+			if (!is_ch_in_mask(valid_chmask, i))
+				continue;
+
 			ret = tas25xx_set_fmt_mask(p_tas25xx, i, FMT_MASK_I2S);
 			if (ret) {
 				dev_err(plat_data->dev,
 					"FMT_MASK_I2S set failed for ch=%d\n", i);
-				break;
+				set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
+				valid_chmask = get_valid_channel_mask(p_tas25xx, chmask);
+				ret = 0;
 			}
 		}
 
@@ -245,12 +301,17 @@ int tas25xx_set_dai_fmt_for_fmt(struct tas25xx_priv *p_tas25xx, unsigned int fmt
 	case (SND_SOC_DAIFMT_DSP_A):
 		dev_info(plat_data->dev,
 			"SND_SOC_DAIFMT_DSP_A tdm_rx_start_slot =1\n");
-		for (i = 0; i < p_tas25xx->ch_count; i++) {
+		for (i = 0; i < ch_count; i++) {
+			if (!is_ch_in_mask(valid_chmask, i))
+				continue;
+
 			ret = tas25xx_set_fmt_mask(p_tas25xx, i, FMT_MASK_DSP_A);
 			if (ret) {
 				dev_err(plat_data->dev,
 					"FMT_MASK_DSP_A set failed for ch=%d\n", i);
-				break;
+				set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
+				valid_chmask = get_valid_channel_mask(p_tas25xx, chmask);
+				ret = 0;
 			}
 		}
 		break;
@@ -258,12 +319,17 @@ int tas25xx_set_dai_fmt_for_fmt(struct tas25xx_priv *p_tas25xx, unsigned int fmt
 	case (SND_SOC_DAIFMT_DSP_B):
 		dev_info(plat_data->dev,
 			"SND_SOC_DAIFMT_DSP_B tdm_rx_start_slot = 0\n");
-		for (i = 0; i < p_tas25xx->ch_count; i++) {
+		for (i = 0; i < ch_count; i++) {
+			if (!is_ch_in_mask(valid_chmask, i))
+				continue;
+
 			ret = tas25xx_set_fmt_mask(p_tas25xx, i, FMT_MASK_DSP_B);
 			if (ret) {
 				dev_err(plat_data->dev,
 					"FMT_MASK_DSP_B set failed for ch=%d\n", i);
-				break;
+				set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
+				valid_chmask = get_valid_channel_mask(p_tas25xx, chmask);
+				ret = 0;
 			}
 		}
 		break;
@@ -271,12 +337,17 @@ int tas25xx_set_dai_fmt_for_fmt(struct tas25xx_priv *p_tas25xx, unsigned int fmt
 	case (SND_SOC_DAIFMT_LEFT_J):
 		dev_info(plat_data->dev,
 			"SND_SOC_DAIFMT_LEFT_J tdm_rx_start_slot = 0\n");
-		for (i = 0; i < p_tas25xx->ch_count; i++) {
+		for (i = 0; i < ch_count; i++) {
+			if (!is_ch_in_mask(valid_chmask, i))
+				continue;
+
 			ret = tas25xx_set_fmt_mask(p_tas25xx, i, FMT_MASK_LEFT_J);
 			if (ret) {
 				dev_err(plat_data->dev,
 					" set failed for ch=%d\n", i);
-				break;
+				set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
+				valid_chmask = get_valid_channel_mask(p_tas25xx, chmask);
+				ret = 0;
 			}
 		}
 		break;
@@ -287,6 +358,11 @@ int tas25xx_set_dai_fmt_for_fmt(struct tas25xx_priv *p_tas25xx, unsigned int fmt
 		break;
 	}
 
+	if (is_err_on_all_ch(p_tas25xx->amp_i2c_err, ch_count)) {
+		tas25xx_log_i2cerr_stats(p_tas25xx);
+		ret = -EIO;
+	}
+
 	return ret;
 }
 
@@ -294,98 +370,66 @@ int tas25xx_set_dai_fmt_for_fmt(struct tas25xx_priv *p_tas25xx, unsigned int fmt
  * This shall be called during the middle of the playback.
  * So all the register settings should be restored back to their original settings.
  */
-int tas25xx_reinit(struct tas25xx_priv *p_tas25xx)
+int tas25xx_reinit_ch(struct tas25xx_priv *p_tas25xx, int ch)
 {
-	int i;
-	int ret;
+	int ret, chmask;
 	struct linux_platform *plat_data =
 		(struct linux_platform *) p_tas25xx->platform_data;
 
-	ret = tas_write_init_config_params(p_tas25xx,
-			p_tas25xx->ch_count);
-	if (ret) {
-		dev_err(plat_data->dev, "Failed to initialize, error=%d\n", ret);
-		return ret;
-	}
+	if (is_error_on_ch(p_tas25xx->amp_i2c_err, ch))
+		return -EIO;
 
-	for (i = 0; i < p_tas25xx->ch_count; i++) {
-		ret = tas25xx_set_init_params(p_tas25xx, i);
-		if (ret < 0) {
-			dev_err(plat_data->dev, "%s error while initialisation for ch=%d\n",
-				__func__, i);
-			break;
-		}
-	}
+	chmask = 1 << ch;
 
-	if (ret)
+	ret = tas25xx_set_init_params(p_tas25xx, ch);
+	if (ret < 0) {
+		dev_err(plat_data->dev, "%s error while initialisation for ch=%d\n",
+			__func__, ch);
 		goto reinit_done;
+	}
+
+	p_tas25xx->curr_rx_bitwidth[ch] = 0;
+	p_tas25xx->curr_tx_bitwidth[ch] = 0;
 
 	/* set dai fmt*/
 	if (p_tas25xx->mn_fmt) {
-		ret = tas25xx_set_dai_fmt_for_fmt(p_tas25xx, p_tas25xx->mn_fmt);
+		ret = tas25xx_set_dai_fmt_for_fmt(p_tas25xx, p_tas25xx->mn_fmt, chmask);
 		if (ret)
 			goto reinit_done;
 	}
 
-	/* hw params */
-	if (p_tas25xx->mn_fmt_mode == 2) {
-		/* TDM mode */
-		ret = tas25xx_set_tdm_rx_slot(p_tas25xx,
-			p_tas25xx->ch_count, p_tas25xx->mn_rx_width);
-		if (ret) {
-			dev_err(plat_data->dev, "%s failed to set Rx slots\n", __func__);
-			goto reinit_done;
-		}
-
-		ret = tas25xx_set_tdm_tx_slot(p_tas25xx,
-			p_tas25xx->ch_count, p_tas25xx->mn_tx_slot_width);
-		if (ret) {
-			dev_err(plat_data->dev, "%s failed to set Tx slots\n", __func__);
-			goto reinit_done;
-		}
-	} else if (p_tas25xx->mn_fmt_mode == 1) {
-		/* I2S mode */
-		for (i = 0; i < p_tas25xx->ch_count; i++) {
-			ret = tas25xx_rx_set_bitwidth(p_tas25xx, p_tas25xx->mn_rx_width, i);
-			if (ret) {
-				dev_err(plat_data->dev,
-					"Error=%d while setting rx bitwidth, ch=%d\n", ret, i);
-				break;
-			}
-		}
-		if (ret)
-			goto reinit_done;
-
-		ret = tas25xx_iv_vbat_slot_config(p_tas25xx, p_tas25xx->mn_tx_slot_width);
-		if (ret) {
-			dev_err(plat_data->dev, "Error=%d while IV vbat slot config %s\n",
-				ret, __func__);
-			goto reinit_done;
-		}
+	ret = tas25xx_set_rx_bitwidth_for_ch(p_tas25xx, p_tas25xx->mn_rx_width, ch);
+	if (ret) {
+		dev_err(plat_data->dev,
+			"Error=%d while setting rx bitwidth, ch=%d\n", ret, ch);
+		goto reinit_done;
 	}
 
-	for (i = 0; i < p_tas25xx->ch_count; i++) {
-		ret = tas25xx_set_sample_rate(p_tas25xx, i, p_tas25xx->sample_rate);
-		if (ret) {
-			dev_err(plat_data->dev, "%s: Error=%d setting sample rate\n",
-				__func__, ret);
-			break;
-		}
+	ret = tas25xx_iv_vbat_slot_config_for_ch(p_tas25xx, p_tas25xx->mn_tx_slot_width, ch);
+	if (ret) {
+		dev_err(plat_data->dev, "Error=%d while IV vbat slot config %s\n",
+			ret, __func__);
+		goto reinit_done;
 	}
-	if (ret)
-		goto reinit_done;
 
-	ret = tas25xx_update_kcontrol_data(p_tas25xx, KCNTR_ANYTIME, 0xFFFF);
-	if (ret)
+	ret = tas25xx_set_sample_rate(p_tas25xx, ch, p_tas25xx->sample_rate);
+	if (ret) {
+		dev_err(plat_data->dev, "%s: Error=%d setting sample rate\n",
+			__func__, ret);
 		goto reinit_done;
+	}
 
+	ret = tas25xx_update_kcontrol_data(p_tas25xx, KCNTR_ANYTIME, chmask);
+	if (ret) {
+		dev_err(plat_data->dev, "%s: Error=%d updating kctnrl data\n",
+			__func__, ret);
+		goto reinit_done;
+	}
 
 reinit_done:
 	return ret;
-
 }
 
-#if IS_ENABLED(CONFIG_TAS25XX_IRQ_BD)
 void tas25xx_clear_interrupt_stats(struct tas25xx_priv *p_tas25xx)
 {
 	int i, j;
@@ -428,7 +472,6 @@ void tas25xx_log_interrupt_stats(struct tas25xx_priv *p_tas25xx)
 		}
 	}
 }
-#endif
 
 /*
  * called with codec lock held
@@ -455,6 +498,9 @@ int tas25xx_irq_work_func(struct tas25xx_priv *p_tas25xx)
 
 	p_tas25xx->disable_irq(p_tas25xx);
 	for (i = 0; i < p_tas25xx->ch_count; i++) {
+		if (is_error_on_ch(p_tas25xx->amp_i2c_err, i))
+			continue;
+
 		ret = tas_dev_interrupt_read(p_tas25xx, i, &type);
 		if (ret)
 			intr_detected |= (1 << i);
@@ -462,14 +508,19 @@ int tas25xx_irq_work_func(struct tas25xx_priv *p_tas25xx)
 	p_tas25xx->enable_irq(p_tas25xx);
 
 	if (intr_detected == 0) {
-		if (is_power_up_state(p_tas25xx->m_power_state))
+		if (is_power_up_state(p_tas25xx->m_power_state)) {
 			for (i = 0; i < p_tas25xx->ch_count; i++)
-				tas25xx_dump_regs(p_tas25xx, i);
+				if (!is_error_on_ch(p_tas25xx->amp_i2c_err, i))
+					tas25xx_dump_regs(p_tas25xx, i);
+		}
 		return ret;
 	}
 
 	for (i = 0; i < p_tas25xx->ch_count; i++) {
 		if ((intr_detected & (1 << i)) == 0)
+			continue;
+
+		if (is_error_on_ch(p_tas25xx->amp_i2c_err, i))
 			continue;
 
 		intr_data = &p_tas25xx->intr_data[i];
@@ -479,9 +530,6 @@ int tas25xx_irq_work_func(struct tas25xx_priv *p_tas25xx)
 
 		tasdev = p_tas25xx->devs[i];
 
-#if IS_ENABLED(CONFIG_TISA_SYSFS_INTF)
-		tas25xx_algo_bump_oc_count(0, 0);
-#endif
 		ret = tas_dev_interrupt_disable(p_tas25xx, i);
 		if (tasdev->irq_count != 0) {
 			if (time_after(jiffies, tasdev->jiffies +
@@ -507,9 +555,11 @@ int tas25xx_irq_work_func(struct tas25xx_priv *p_tas25xx)
 			continue;
 
 		ret = tas_dev_interrupt_clear(p_tas25xx, i);
-		if (ret)
+		if (ret) {
 			dev_warn(plat_data->dev,
-				"%s Unable to clear interrupt, ch=%d", __func__, i);
+				"%s Unable to clear interrupt, ch=%d\n", __func__, i);
+			set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
+		}
 
 		clk_intr = 0;
 		othr_intr = 0;
@@ -518,8 +568,8 @@ int tas25xx_irq_work_func(struct tas25xx_priv *p_tas25xx)
 		for (j = 0; j < interrupt_count; j++) {
 			intr_info = &intr_data->intr_info[j];
 			if (intr_info->detected) {
-				dev_info(plat_data->dev,
-					"ch=%d Interrupt action for the detected interrupt %s is %d",
+				dev_err(plat_data->dev,
+					"ch=%d Interrupt action for the detected interrupt %s is %d\n",
 					i, intr_info->name, intr_info->action);
 				int_actions |= intr_info->action;
 				if (intr_info->action & TAS_INT_ACTION_POWER_ON)
@@ -532,12 +582,19 @@ int tas25xx_irq_work_func(struct tas25xx_priv *p_tas25xx)
 				else
 					othr_intr = 1;
 
+				if (intr_info->notify_int_val) {
+					dev_err(plat_data->dev, "ch=%d INTR: %s Notify: %d\n",
+						i, intr_info->name, intr_info->notify_int_val);
+					tas25xx_post_amp_err_to_platform(p_tas25xx->devs[i]->mn_addr,
+						intr_info->notify_int_val);
+				}
+
 				/* reset to not detected after detection */
 				intr_info->detected = 0;
 			}
 		}
 
-		dev_info(plat_data->dev, "ch=%d INTR force power on?(y/n):%s",
+		dev_info(plat_data->dev, "ch=%d INTR force power on?(y/n):%s\n",
 			i, power_on_required ? "y":"n");
 		if (!power_on_required) {
 			if (othr_intr)
@@ -554,41 +611,45 @@ int tas25xx_irq_work_func(struct tas25xx_priv *p_tas25xx)
 		if (clk_intr && !othr_intr) {
 			int_actions = int_actions & ~TAS_INT_ACTION_POWER_ON;
 			dev_info(plat_data->dev,
-				"ch=%d INTR power on ignored for [clk=%d oth=%d]",
+				"ch=%d INTR power on ignored for [clk=%d oth=%d]\n",
 				i, clk_intr, othr_intr);
 		}
 
 		/* order should be followed */
 		if (int_actions & TAS_INT_ACTION_HW_RESET) {
-			dev_info(plat_data->dev, "ch=%d Interrupt action hard reset", i);
+			dev_info(plat_data->dev, "ch=%d Interrupt action hard reset\n", i);
 			tas25xx_hard_reset(p_tas25xx);
 			reset_done = 1;
 		}
 
 		if (int_actions & TAS_INT_ACTION_SW_RESET) {
-			dev_info(plat_data->dev, "ch=%d Interrupt action software reset", i);
+			dev_info(plat_data->dev, "ch=%d Interrupt action software reset\n", i);
 			ret = tas25xx_software_reset(p_tas25xx, i);
-			if (ret)
+			if (ret) {
 				dev_err(plat_data->dev,
-					"ch=%d Software reset failed error=%d", i, ret);
+					"ch=%d Software reset failed error=%d\n", i, ret);
+				set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
+			}
 			reset_done = 1;
 		}
 
 		if (reset_done)
-			ret = tas25xx_reinit(p_tas25xx);
+			ret = tas25xx_reinit_ch(p_tas25xx, i);
 
 		if (int_actions & TAS_INT_ACTION_POWER_ON) {
-			tas25xx_check_if_powered_on(p_tas25xx, &state, i);
+			ret = tas25xx_check_if_powered_on(p_tas25xx, &state, i);
+			set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
 			if (state == 0) {
 				/* interrupts are enabled during power up sequence */
 				dev_info(plat_data->dev,
-					"ch=%d Try powering on the device", i);
+					"ch=%d Try powering on the device\n", i);
 				ret = tas25xx_set_power_state(p_tas25xx,
 					TAS_POWER_ACTIVE, (1<<i));
 			} else {
 				dev_info(plat_data->dev,
-					"ch=%d Already powered on, Enable the interrupt", i);
+					"ch=%d Already powered on, Enable the interrupt\n", i);
 				ret = tas_dev_interrupt_enable(p_tas25xx, i);
+				set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
 			}
 		}
 	}
@@ -609,34 +670,40 @@ int tas25xx_init_work_func(struct tas25xx_priv *p_tas25xx, struct tas_device *de
 
 	dev_info(plat_data->dev, "ch=%d %s\n", chn, __func__);
 	ret = tas25xx_set_post_powerup(p_tas25xx, chn);
-	if (ret)
+	if (ret) {
+		set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, chn);
 		dev_err(plat_data->dev,
 			"ch=%d Error in  post powerup data write.  err=%d\n",
 			chn, ret);
+	}
 
 	/* check for interrupts during power up */
 	detected = tas_dev_interrupt_read(p_tas25xx, chn, &type);
 	if (detected) {
 		if (type == INTERRUPT_TYPE_CLOCK_BASED) {
 			/* ignore clock based interrupts which we are monitoring */
-			dev_info(plat_data->dev,
-				"Ignoring clock based interrupts and clear latch");
+			dev_warn(plat_data->dev,
+				"Ignoring clock based interrupts and clear latch\n");
 			ret = tas_dev_interrupt_clear(p_tas25xx, chn);
-			if (ret)
+			if (ret) {
 				dev_err(plat_data->dev,
 					"ch=%d Error while clearing interrup err=%d\n",
 					chn, ret);
+				set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, chn);
+			}
 		} else {
-			dev_info(plat_data->dev,
-				"Non clock based interrupts detected, skip latch clear for recovery");
+			dev_err(plat_data->dev,
+				"Non clock based interrupts detected, skip latch clear for recovery\n");
 		}
 	}
 
 	/* enabling the interrupt here to avoid any clock errors during the bootup*/
 	ret = tas_dev_interrupt_enable(p_tas25xx, chn);
-	if (ret)
+	if (ret) {
 		dev_err(plat_data->dev,
 			"ch=%d %s: Failed to enable interrupt\n", chn, __func__);
+		set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, chn);
+	}
 
 	return ret;
 }
@@ -666,7 +733,6 @@ int tas25xx_register_device(struct tas25xx_priv  *p_tas25xx)
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_TAS25XX_IRQ_BD)
 static ssize_t irq_bd_show(struct device *dev,
 		struct device_attribute *attr,
 		char *buf)
@@ -679,7 +745,7 @@ static ssize_t irq_bd_show(struct device *dev,
 	struct tas25xx_priv *p_tas25xx = dev_get_drvdata(dev);
 
 	if (!p_tas25xx) {
-		dev_info(dev, "dev_get_drvdata returned NULL");
+		dev_info(dev, "dev_get_drvdata returned NULL\n");
 		return -EINVAL;
 	}
 
@@ -699,8 +765,7 @@ static ssize_t irq_bd_show(struct device *dev,
 		return snprintf(buf, 32, "count=%u\npersist=%llu\n",
 			intr_info->count, intr_info->count_persist);
 	else
-		return snprintf(buf, 32, "something went wrong!!!");
-
+		return snprintf(buf, 32, "something went wrong!!!\n");
 }
 
 static struct attribute_group s_attribute_group = {
@@ -745,6 +810,7 @@ int tas_smartamp_add_irq_bd(struct tas25xx_priv *p_tas25xx)
 
 			intr_info->dev_attr = &p_irqpd[k];
 			attribute_array[k] = &p_irqpd[k].attr;
+			sysfs_attr_init(attribute_array[k]);
 			k++;
 		}
 	}
@@ -797,7 +863,6 @@ static void tas_smartamp_remove_irq_bd(struct tas25xx_priv *p_tas25xx)
 
 	memset(bd, 0, sizeof(struct irq_bigdata));
 }
-#endif
 
 enum cmd_type_t {
 	CALIB,
@@ -822,14 +887,27 @@ static uint8_t tas25xx_get_amb_temp(void)
 {
 	struct power_supply *psy;
 	union power_supply_propval value = {0};
+	int ret = 0;
 
-	psy = power_supply_get_by_name("battery");
-	if (!psy || !psy->desc || !psy->desc->get_property) {
+	psy = power_supply_get_by_name(REF_TEMP_DEVICE_NAME);
+	if (!psy) {
 		pr_err("[TI-SmartPA:%s] getting ambient temp failed, using default value %d\n",
 			__func__, DEFAULT_AMBIENT_TEMP);
+
 		return DEFAULT_AMBIENT_TEMP;
 	}
-	psy->desc->get_property(psy, POWER_SUPPLY_PROP_TEMP, &value);
+
+	ret = power_supply_get_property(psy,
+		POWER_SUPPLY_PROP_TEMP, &value);
+	if (psy)
+		power_supply_put(psy);
+
+	if (ret) {
+		pr_err("[TI-SmartPA:%s] failed to get temp property (err %d)\n",
+			__func__, ret);
+
+		return DEFAULT_AMBIENT_TEMP;
+	}
 
 	return DIV_ROUND_CLOSEST(value.intval, 10);
 }
@@ -839,15 +917,17 @@ static ssize_t cmd_show(struct device *dev,
 		char *buf)
 {
 	int32_t i, cmd_count, found = 0, ret = -EINVAL, temp;
+	int inv_err;
 
 	struct tas25xx_priv *p_tas25xx = dev_get_drvdata(dev);
 
 	if (!p_tas25xx) {
 		dev_info(dev,
-			"%s get_drvdata returned NULL", __func__);
+			"%s get_drvdata returned NULL\n", __func__);
 		return ret;
 	}
 
+	inv_err = ~p_tas25xx->amp_i2c_err;
 	cmd_count = ARRAY_SIZE(cmd_arr);
 
 	for (i = 0; i < cmd_count; i++) {
@@ -871,7 +951,7 @@ static ssize_t cmd_show(struct device *dev,
 		break;
 
 		case DRV_OPMODE:
-			temp = tas25xx_get_drv_channel_opmode();
+			temp = inv_err & tas25xx_get_drv_channel_opmode();
 			ret = snprintf(buf, 32, "0x%x", temp);
 		break;
 
@@ -892,7 +972,7 @@ static ssize_t cmd_store(struct device *dev,
 	struct tas25xx_priv *p_tas25xx = dev_get_drvdata(dev);
 
 	if (!p_tas25xx) {
-		dev_info(dev, "%s drv_data is null", __func__);
+		dev_info(dev, "%s drv_data is null\n", __func__);
 		return ret;
 	}
 
@@ -913,12 +993,12 @@ static ssize_t cmd_store(struct device *dev,
 				tas25xx_prep_dev_for_calib(0);
 			else
 				dev_info(dev,
-					"%s Not supported %s, for calib", __func__, buf);
+					"%s Not supported %s, for calib\n", __func__, buf);
 		} else {
-			dev_info(dev, "%s Not supported %s", __func__, buf);
+			dev_info(dev, "%s Not supported %s\n", __func__, buf);
 		}
 	} else {
-		dev_info(dev, "%s Not supported %s", __func__, buf);
+		dev_info(dev, "%s Not supported %s\n", __func__, buf);
 	}
 
 	return size;
@@ -1030,12 +1110,10 @@ int tas_smartamp_add_sysfs(struct tas25xx_priv *p_tas25xx)
 
 	if (class) {
 		p_tas25xx->class = class;
-#if IS_ENABLED(CONFIG_TAS25XX_IRQ_BD)
 		ret = tas_smartamp_add_irq_bd(p_tas25xx);
 		if (ret)
 			dev_err(plat_data->dev,
 				"%s err registring irqbd %d\n", __func__, ret);
-#endif
 		tas_smartamp_add_cmd_intf(p_tas25xx);
 	}
 
@@ -1044,17 +1122,13 @@ int tas_smartamp_add_sysfs(struct tas25xx_priv *p_tas25xx)
 
 void tas_smartamp_remove_sysfs(struct tas25xx_priv *p_tas25xx)
 {
-#if IS_ENABLED(CONFIG_TAS25XX_IRQ_BD)
 	struct linux_platform *plat_data =
 		(struct linux_platform *) p_tas25xx->platform_data;
-#endif
 
 	tas_smartamp_remove_cmd_intf(p_tas25xx);
-#if IS_ENABLED(CONFIG_TAS25XX_IRQ_BD)
 	tas_smartamp_remove_irq_bd(p_tas25xx);
 	dev_info(plat_data->dev,
 			"%s de-registring irqbd done\n", __func__);
-#endif
 
 	if (p_tas25xx->class) {
 		device_destroy(p_tas25xx->class, 1);
@@ -1065,30 +1139,46 @@ void tas_smartamp_remove_sysfs(struct tas25xx_priv *p_tas25xx)
 
 int tas25xx_probe(struct tas25xx_priv *p_tas25xx)
 {
-	int ret = -1, i = 0;
+	int ret = -1, i;
+	int ch_count = p_tas25xx->ch_count;
 	struct linux_platform *plat_data =
 		(struct linux_platform *) p_tas25xx->platform_data;
 
-	for (i = 0; i < p_tas25xx->ch_count; i++) {
+	if (is_err_on_all_ch(p_tas25xx->amp_i2c_err, ch_count)) {
+		tas25xx_log_i2cerr_stats(p_tas25xx);
+		return -EIO;
+	}
+
+	for (i = 0; i < ch_count; i++) {
+		if (is_error_on_ch(p_tas25xx->amp_i2c_err, i))
+			continue;
+
 		ret = tas25xx_set_init_params(p_tas25xx, i);
-		if (ret < 0) {
-			dev_err(plat_data->dev, "%s err=%d, initialisation",
+		if (ret) {
+			set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
+			dev_err(plat_data->dev, "%s err=%d, initialisation\n",
 				__func__, ret);
-			goto end;
 		}
+	}
+
+	if (is_err_on_all_ch(p_tas25xx->amp_i2c_err, ch_count)) {
+		tas25xx_log_i2cerr_stats(p_tas25xx);
+		ret = -EIO;
+		goto end;
 	}
 
 	ret = tas25xx_create_kcontrols(p_tas25xx);
 	if (ret) {
-		dev_warn(plat_data->dev, "%s err=%d creating controls",
+		dev_warn(plat_data->dev, "%s err=%d creating controls\n",
 			__func__, ret);
 		ret = 0;
 	}
 
-#if IS_ENABLED(CONFIG_TAS25XX_ALGO)
+	if (p_tas25xx->is_reload)
+		goto end;
+
 	tas_smartamp_add_algo_controls(plat_data->codec, plat_data->dev,
 		p_tas25xx->ch_count);
-#endif
 	tas_smartamp_add_sysfs(p_tas25xx);
 
 end:
@@ -1097,20 +1187,18 @@ end:
 
 void tas25xx_remove(struct tas25xx_priv *p_tas25xx)
 {
-#if IS_ENABLED(CONFIG_TAS25XX_ALGO)
 	struct linux_platform *plat_data =
 		(struct linux_platform *) p_tas25xx->platform_data;
 	tas_smartamp_remove_algo_controls(plat_data->codec);
-#endif
 	/* REGBIN related */
 	tas25xx_remove_binfile(p_tas25xx);
 	tas_smartamp_remove_sysfs(p_tas25xx);
 }
 
 int tas25xx_set_power_state(struct tas25xx_priv *p_tas25xx,
-			enum tas_power_states_t state, uint32_t ch_bitmask)
+			enum tas_power_states_t state, uint32_t chmask)
 {
-	int ret = 0, i = 0;
+	int ret = 0, i = 0, status = 0;
 	enum tas_power_states_t cur_state;
 	struct linux_platform *plat_data =
 		(struct linux_platform *) p_tas25xx->platform_data;
@@ -1122,35 +1210,52 @@ int tas25xx_set_power_state(struct tas25xx_priv *p_tas25xx,
 	p_tas25xx->m_power_state = state;
 
 	/* supports max 4 channels */
-	ch_bitmask &= tas25xx_get_drv_channel_opmode() & 0xF;
+	chmask &= tas25xx_get_drv_channel_opmode() & 0xF;
+	chmask = (~p_tas25xx->amp_i2c_err & chmask) &
+			((1 << p_tas25xx->ch_count) - 1);
 
 	switch (state) {
 	case TAS_POWER_ACTIVE:
 		for (i = 0; i < p_tas25xx->ch_count; i++) {
-			if ((ch_bitmask & (1<<i)) == 0)
+			if (!is_ch_in_mask(chmask, i))
 				continue;
+
+			ret = tas25xx_check_for_default_vals(p_tas25xx, &status, i);
+			if (!ret) {
+				dev_dbg(plat_data->dev, "check for default values status = %d\n", status);
+				if (status > 0) {
+					dev_info(plat_data->dev, "reg are found to be in default, reinit dev\n");
+					ret = tas25xx_reinit_ch(p_tas25xx, i);
+					set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
+					if (ret)
+						dev_err(plat_data->dev, "ch=%d re-init failed\n", i);
+				}
+			}
 
 			if (cur_state != state) {
 				dev_dbg(plat_data->dev,
-					"ch=%d %s: clearing interrupts \n", i, __func__);
+					"ch=%d %s: clearing interrupts\n", i, __func__);
 
 				ret = tas_dev_interrupt_clear(p_tas25xx, i);
 				if (ret) {
+					set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
 					dev_err(plat_data->dev,
 						"ch=%d %s: Error clearing interrupt\n", i, __func__);
 					ret = 0;
 				}
 			} else {
 				dev_dbg(plat_data->dev,
-					"ch=%d %s: skipping clearing interrupts \n", i, __func__);
+					"ch=%d %s: skipping clearing interrupts\n", i, __func__);
 			}
 
 			ret = tas25xx_set_pre_powerup(p_tas25xx, i);
 			if (ret) {
+				set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
 				dev_err(plat_data->dev, "ch=%d %s setting power state failed, err=%d\n",
 					i, __func__, ret);
 			} else {
 				ret = tas25xx_update_kcontrol_data(p_tas25xx, KCNTR_PRE_POWERUP, (1 << i));
+				set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
 				p_tas25xx->schedule_init_work(p_tas25xx, i);
 			}
 		}
@@ -1158,22 +1263,30 @@ int tas25xx_set_power_state(struct tas25xx_priv *p_tas25xx,
 
 	case TAS_POWER_MUTE:
 		for (i = 0; i < p_tas25xx->ch_count; i++) {
-			if ((ch_bitmask & (1<<i)) == 0)
+			if (!is_ch_in_mask(chmask, i))
 				continue;
-			tas25xx_set_power_mute(p_tas25xx, i);
+			ret = tas25xx_set_power_mute(p_tas25xx, i);
+			set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
 		}
 		break;
 
 	case TAS_POWER_SHUTDOWN:
 		for (i = 0; i < p_tas25xx->ch_count; i++) {
-			if ((ch_bitmask & (1<<i)) == 0)
+			if (!is_ch_in_mask(chmask, i))
 				continue;
 
 			/* device interrupt disable */
-			tas_dev_interrupt_disable(p_tas25xx, i);
+			ret = tas_dev_interrupt_disable(p_tas25xx, i);
+			set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
+
 			p_tas25xx->cancel_init_work(p_tas25xx, i);
 			ret = tas25xx_set_pre_powerdown(p_tas25xx, i);
-			ret |= tas25xx_set_post_powerdown(p_tas25xx, i);
+			ret = tas25xx_update_kcontrol_data(p_tas25xx, KCNTR_PRE_POWERDN, (1 << i));
+			set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
+
+			ret = tas25xx_set_post_powerdown(p_tas25xx, i);
+			ret = tas25xx_update_kcontrol_data(p_tas25xx, KCNTR_POST_POWERDN, (1 << i));
+			set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
 		}
 		break;
 
@@ -1253,49 +1366,64 @@ int get_next_possible_iv_width(int current_iv_width)
 	return ret;
 }
 
-int tas25xx_iv_vbat_slot_config(struct tas25xx_priv *p_tas25xx,
-	int mn_slot_width)
+static int tas25xx_iv_vbat_slot_config_for_ch(struct tas25xx_priv *p_tas25xx,
+	int mn_slot_width, int ch)
 {
-	int i;
 	int ret = -EINVAL;
 	int iv_width, prev_iv_width, vbat_on;
 	int near_match_found = 0;
 	char tx_fmt[32];
 	struct linux_platform *plat_data;
+	int tdm_mode = 0;
+
+	plat_data = (struct linux_platform *)p_tas25xx->platform_data;
 
 	/* treating 24bit and 32bit as same */
 	if (mn_slot_width == 32)
 		mn_slot_width = 24;
 
-	plat_data = (struct linux_platform *) p_tas25xx->platform_data;
+	if (p_tas25xx->curr_tx_bitwidth[ch] == mn_slot_width) {
+		dev_info(plat_data->dev, "set %2d_%s_%02d_%02d_%1d, ch=%d\n",
+			mn_slot_width, (p_tas25xx->tx_ch_count > 2) ? "TDM" : "I2S",
+			p_tas25xx->ch_count, p_tas25xx->mn_iv_width,
+			p_tas25xx->mn_vbat, ch);
+
+		return 0;
+	}
+
+	if (!p_tas25xx->tx_ch_count)
+		p_tas25xx->tx_ch_count = p_tas25xx->ch_count;
+
+	if (p_tas25xx->tx_ch_count > 2)
+		tdm_mode = 1;
 
 	scnprintf(tx_fmt, 15, "%2d_%s_%02d_%02d_%1d", mn_slot_width,
-		p_tas25xx->mn_fmt_mode == 2 ? "TDM" : "I2S", p_tas25xx->ch_count,
+		tdm_mode ? "TDM" : "I2S", p_tas25xx->ch_count,
 		p_tas25xx->mn_iv_width, p_tas25xx->mn_vbat);
 
-	dev_info(plat_data->dev, "finding exact match for %s", tx_fmt);
+	dev_info(plat_data->dev, "finding exact match for %s\n", tx_fmt);
 
-	for (i = 0; i < p_tas25xx->ch_count; i++) {
-		uint8_t *data = p_tas25xx->block_op_data[i].tx_fmt_data;
+	if (ch < p_tas25xx->ch_count) {
+		uint8_t *data = p_tas25xx->block_op_data[ch].tx_fmt_data;
 
 		iv_width = p_tas25xx->mn_iv_width;
 		vbat_on = p_tas25xx->mn_vbat;
 
 		/* Try to find exact match */
-		if ((i > 0) && (near_match_found)) {
-			dev_info(plat_data->dev, "same format is being used %s, ch=%d", tx_fmt, i);
+		if ((ch > 0) && (near_match_found)) {
+			dev_info(plat_data->dev, "same format is being used %s, ch=%d\n", tx_fmt, ch);
 		} else {
 			scnprintf(tx_fmt, 15, "%2d_%s_%02d_%02d_%1d", mn_slot_width,
-				p_tas25xx->mn_fmt_mode == 2 ? "TDM" : "I2S", p_tas25xx->ch_count,
+				tdm_mode ? "TDM" : "I2S", p_tas25xx->ch_count,
 				p_tas25xx->mn_iv_width, p_tas25xx->mn_vbat);
 		}
 
 		if (find_fmt_match(p_tas25xx, tx_fmt, &data) >= 0) {
 			/* match found */
-			dev_info(plat_data->dev, "exact match found for %s, ch=%d", tx_fmt, i);
+			dev_info(plat_data->dev, "exact match found for %s, ch=%d\n", tx_fmt, ch);
 		} else {
 			/* try near possible option */
-			dev_err(plat_data->dev, "exact match was not found for %s, trying to find near match", tx_fmt);
+			dev_err(plat_data->dev, "exact match was not found for %s, trying to find near match\n", tx_fmt);
 			/*1. Try with reduced bit width - 16 -> 12 -> 8 */
 			while (1) {
 				prev_iv_width = iv_width;
@@ -1311,140 +1439,125 @@ int tas25xx_iv_vbat_slot_config(struct tas25xx_priv *p_tas25xx,
 					}
 				}
 				scnprintf(tx_fmt, 15, "%2d_%s_%02d_%02d_%1d", mn_slot_width,
-					p_tas25xx->mn_fmt_mode == 2 ? "TDM" : "I2S", p_tas25xx->ch_count,
+					tdm_mode ? "TDM" : "I2S", p_tas25xx->ch_count,
 					iv_width, vbat_on);
-				dev_info(plat_data->dev, "finding near match with %s", tx_fmt);
+				dev_info(plat_data->dev, "finding near match with %s\n", tx_fmt);
 				/* reset data for fresh search with new string */
-				data = p_tas25xx->block_op_data[i].tx_fmt_data;
+				data = p_tas25xx->block_op_data[ch].tx_fmt_data;
 				if (find_fmt_match(p_tas25xx, tx_fmt, &data) >= 0) {
-					dev_info(plat_data->dev, "near match found: %s for ch=%d", tx_fmt, i);
-					near_match_found |= (1 << i);
+					dev_info(plat_data->dev, "near match found: %s for ch=%d\n", tx_fmt, ch);
+					near_match_found |= (1 << ch);
 					break;
 				}
 			} /* <while loop> */
 		} /* if-else */
 
 		if (data) {
-			dev_info(plat_data->dev, "possible/exact match found %s for iv=%d, vbat=%d",
+			dev_info(plat_data->dev, "possible/exact match found %s for iv=%d, vbat=%d\n",
 				tx_fmt, p_tas25xx->mn_iv_width, p_tas25xx->mn_vbat);
-			ret = tas25xx_process_block(p_tas25xx, (char *)data, i);
+			ret = tas25xx_process_block(p_tas25xx, (char *)data, ch);
 			/* error setting iv width */
 			if (ret) {
-				dev_info(plat_data->dev, "process block error for %s for iv=%d, vbat=%d",
+				set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, ch);
+				dev_info(plat_data->dev, "process block error for %s for iv=%d, vbat=%d\n",
 					tx_fmt, p_tas25xx->mn_iv_width, p_tas25xx->mn_vbat);
 			}
 		} else {
-			dev_err(plat_data->dev, "no near match found iv=%d, vbat=%d",
+			dev_err(plat_data->dev, "no near match found iv=%d, vbat=%d\n",
 				p_tas25xx->mn_iv_width, p_tas25xx->mn_vbat);
 			ret = -EINVAL;
-			break;
 		}
-	} /* <for loop> */
+	} /* <if> */
 
 	if (ret == 0) {
 		p_tas25xx->curr_mn_iv_width = iv_width;
 		p_tas25xx->curr_mn_vbat = vbat_on;
 		p_tas25xx->mn_tx_slot_width = mn_slot_width;
+		p_tas25xx->curr_tx_bitwidth[ch] = mn_slot_width;
 	}
 
 	return ret;
 }
 
-/* tas25xx_set_bitwidth function is redesigned to accomodate change in
- * tas25xx_iv_vbat_slot_config()
- */
+int tas25xx_set_rx_bitwidth(struct tas25xx_priv *p_tas25xx, int bitwidth)
+{
+	int i;
+	int ret = 0;
+	struct linux_platform *plat_data;
+	plat_data = (struct linux_platform *) p_tas25xx->platform_data;
+
+	if ((bitwidth != 16) && (bitwidth != 24) && (bitwidth != 32)) {
+		dev_err(plat_data->dev, "%s invalid slot width %d\n",
+			__func__, bitwidth);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < p_tas25xx->ch_count; i++) {
+		if (is_error_on_ch(p_tas25xx->amp_i2c_err, i))
+			continue;
+
+		ret = tas25xx_set_rx_bitwidth_for_ch(p_tas25xx, bitwidth, i);
+		if (ret) {
+			set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
+			dev_err(plat_data->dev, "Error =%d while setting bitwidth, ch=%d\n",
+				ret, i);
+			ret = 0;
+		}
+	}
+
+	if (is_err_on_all_ch(p_tas25xx->amp_i2c_err, p_tas25xx->ch_count)) {
+		ret = -EIO;
+		tas25xx_log_i2cerr_stats(p_tas25xx);
+	} else {
+		p_tas25xx->mn_rx_width = bitwidth;
+	}
+
+	return ret;
+}
+
+int tas25xx_set_tx_bitwidth(struct tas25xx_priv *p_tas25xx, int bitwidth)
+{
+	int i;
+	int ret = 0;
+	struct linux_platform *plat_data;
+	plat_data = (struct linux_platform *) p_tas25xx->platform_data;
+
+	if ((bitwidth != 16) && (bitwidth != 24) && (bitwidth != 32)) {
+		dev_err(plat_data->dev, "%s invalid slot width %d\n",
+			__func__, bitwidth);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < p_tas25xx->ch_count; i++) {
+		if (is_error_on_ch(p_tas25xx->amp_i2c_err, i))
+			continue;
+
+		tas25xx_iv_vbat_slot_config_for_ch(p_tas25xx, bitwidth, i);
+	}
+
+	if (is_err_on_all_ch(p_tas25xx->amp_i2c_err, p_tas25xx->ch_count)) {
+		tas25xx_log_i2cerr_stats(p_tas25xx);
+		ret = -EIO;
+	}
+
+	return ret;
+}
+
 int tas25xx_set_bitwidth(struct tas25xx_priv *p_tas25xx,
 	int bitwidth, int stream)
 {
-	int i;
 	int ret = -EINVAL;
 	struct linux_platform *plat_data;
 
 	plat_data = (struct linux_platform *) p_tas25xx->platform_data;
 
-	dev_info(plat_data->dev, "%s: bitwidth %d stream %d\n", __func__, bitwidth, stream);
+	dev_info(plat_data->dev, "%s: bitwidth %d stream %d\n",
+		__func__, bitwidth, stream);
 
-	if (stream == TAS25XX_STREAM_PLAYBACK) {
-		for (i = 0; i < p_tas25xx->ch_count; i++) {
-			ret = tas25xx_rx_set_bitwidth(p_tas25xx, bitwidth, i);
-			if (ret) {
-				dev_err(plat_data->dev, "Error =%d while setting bitwidth, ch=%d,",
-					ret, i);
-			}
-		}
-	/*stream == TAS25XX_STREAM_CAPTURE*/
-	} else {
-		ret = tas25xx_iv_vbat_slot_config(p_tas25xx, bitwidth);
-		if (ret)
-			dev_err(plat_data->dev, "Error =%d with %s", ret, __func__);
-	}
-
-	return ret;
-}
-
-/* tas25xx_set_tdm_rx_slot function is redesigned to accomodate change in
- * tas25xx_iv_vbat_slot_config()
- */
-int tas25xx_set_tdm_rx_slot(struct tas25xx_priv *p_tas25xx,
-	int slots, int slot_width)
-{
-	int i;
-	int ret = -1;
-	struct linux_platform *plat_data;
-
-	plat_data = (struct linux_platform *) p_tas25xx->platform_data;
-
-	dev_info(plat_data->dev, "%s: slots=%d, slot_width=%d",
-		__func__, slots, slot_width);
-
-	if (((p_tas25xx->ch_count == 1) && (slots < 1)) ||
-		((p_tas25xx->ch_count == 2) && (slots < 2))) {
-		dev_err(plat_data->dev, "Invalid Slots %d\n", slots);
-		return ret;
-	}
-	p_tas25xx->mn_slots = slots;
-
-	if ((slot_width != 16) &&
-		(slot_width != 24) &&
-		(slot_width != 32)) {
-		dev_err(plat_data->dev, "Unsupported slot width %d\n", slot_width);
-		return ret;
-	}
-
-	for (i = 0; i < p_tas25xx->ch_count; i++) {
-		ret = tas25xx_rx_set_bitwidth(p_tas25xx, slot_width, i);
-		if (ret) {
-			dev_err(plat_data->dev, "Error =%d while setting bitwidth, ch=%d,",
-				ret, i);
-		}
-	}
-
-	return ret;
-}
-
-/* tas25xx_set_tdm_tx_slot function is redesigned to accomodate change in
- * tas25xx_iv_vbat_slot_config()
- */
-int tas25xx_set_tdm_tx_slot(struct tas25xx_priv *p_tas25xx,
-	int slots, int slot_width)
-{
-	int ret = -1;
-
-	if ((slot_width != 16) &&
-		(slot_width != 24) &&
-		(slot_width != 32)) {
-		pr_err("Unsupported slot width %d\n", slot_width);
-		return ret;
-	}
-
-	if (((p_tas25xx->ch_count == 1) && (slots < 2)) ||
-		((p_tas25xx->ch_count == 2) && (slots < 4))) {
-		pr_err("Invalid Slots %d\n", slots);
-		return ret;
-	}
-	p_tas25xx->mn_slots = slots;
-
-	ret = tas25xx_iv_vbat_slot_config(p_tas25xx, slot_width);
+	if (stream == TAS25XX_STREAM_PLAYBACK)
+		ret = tas25xx_set_rx_bitwidth(p_tas25xx, bitwidth);
+	else
+		ret = tas25xx_set_tx_bitwidth(p_tas25xx, bitwidth);
 
 	return ret;
 }

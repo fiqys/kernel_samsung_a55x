@@ -21,14 +21,8 @@
 #define TIMEOUT_MS 130
 #define READ_WRITE_ALL_PARAM 0
 
-#define DEBUG_ABOX_ADAPTATION
-
-#ifdef DEBUG_ABOX_ADAPTATION
 #define dbg_abox_adaptation(format, args...)	\
 pr_info("[ABOX_ADAPTATION] %s: " format "\n", __func__, ## args)
-#else
-#define dbg_abox_adaptation(format, args...)
-#endif /* DEBUG_ABOX_ADAPTATION */
 
 static DECLARE_WAIT_QUEUE_HEAD(wq_read);
 static DECLARE_WAIT_QUEUE_HEAD(wq_write);
@@ -40,15 +34,12 @@ bool abox_ipc_irq_read_avail;
 bool abox_ipc_irq_write_avail;
 int dsm_offset;
 
-#ifdef SMART_AMP
 #define SMARTPA_ABOX_ERROR	0xF0F0F0F0
 struct ti_smartpa_data *ti_smartpa_rd_data;
 struct ti_smartpa_data ti_smartpa_rd_data_tmp;
 struct ti_smartpa_data *ti_smartpa_wr_data;
 struct ti_smartpa_data ti_smartpa_wr_data_tmp;
-#endif /* SMART_AMP */
 
-#ifdef SMART_AMP
 int ti_smartpa_read(void *prm_data, int offset, int size)
 {
 	ABOX_IPC_MSG msg;
@@ -122,11 +113,7 @@ int ti_smartpa_write(void *prm_data, int offset, int size)
 		, sizeof(erap_msg->param.raw)));
 
 	dbg_abox_adaptation("");
-#if 1 /* ToDo : TI AMP firmware don't send acknowledge about write IPC */
 	abox_ipc_irq_write_avail = true;
-#else
-	abox_ipc_irq_write_avail = false;
-#endif
 
 	if (!dma_data) {
 		pr_err("[TI-SmartPA:%s] dma_data is NULL", __func__);
@@ -161,7 +148,6 @@ error:
 	return -1;
 }
 EXPORT_SYMBOL_GPL(ti_smartpa_write);
-#endif /* SMART_AMP */
 
 static irqreturn_t abox_adaptation_irq_handler(int irq,
 					void *dev_id, ABOX_IPC_MSG *msg)
@@ -180,7 +166,6 @@ static irqreturn_t abox_adaptation_irq_handler(int irq,
 			/* pr_info("%s: type(0x%x)\n", __func__, erap_msg->msgtype); */
 		break;
 		case REALTIME_EXTRA:
-#ifdef SMART_AMP
 			if (erap_msg->param.raw.params[0] == TI_SMARTPA_VENDOR_ID) {
 				if (erap_msg->param.raw.params[1] == RD_DATA) {
 					memcpy(&ti_smartpa_rd_data_tmp.payload[0], &erap_msg->param.raw.params[4],
@@ -204,7 +189,6 @@ static irqreturn_t abox_adaptation_irq_handler(int irq,
 				}
 			}
 			ret = IRQ_HANDLED;
-#endif /* SMART_AMP */
 		break;
 		default:
 			pr_err("%s: unknown message type(%d)\n", __func__, erap_msg->msgtype);

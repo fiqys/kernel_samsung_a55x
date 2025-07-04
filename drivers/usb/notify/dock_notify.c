@@ -357,6 +357,8 @@ static int call_device_notify(struct usb_device *dev, int connect)
 			store_usblog_notify(NOTIFY_PORT_CONNECT,
 				(void *)&dev->descriptor.idVendor,
 				(void *)&dev->descriptor.idProduct);
+			store_usblog_notify(NOTIFY_PORT_SPEED,
+				(void *)&dev->speed, NULL);
 
 			seek_usb_interface(dev);
 
@@ -406,7 +408,7 @@ static int call_device_notify(struct usb_device *dev, int connect)
 				disconnect_usb_driver(dev);
 				usb_set_device_state(dev, USB_STATE_NOTATTACHED);
 				dev->authorized = 0;
-			} else if (ret == USB_NOTIFY_ALLOWLOST) {
+			} else if (ret == USB_NOTIFY_ALLOWLIST) {
 				if (!match_roothub_vid_pid(dev)) {
 					connect_usb_driver(dev);
 				} else {

@@ -61,10 +61,9 @@ static uint8_t trans_val_to_user_m(uint32_t val, uint8_t qformat)
 /*Max value supported is 2^8*/
 static uint8_t trans_val_to_user_i(uint32_t val, uint8_t qformat)
 {
-	return ((val * 100) >> qformat) / 100;
+	return (uint8_t)((((long long)val * 100) >> qformat) / 100);
 }
 
-#ifdef CONFIG_SET_RE_IN_KERNEL
 static int get_calibrated_re_tcalib(uint32_t *rdc_fix, uint32_t *tv_fix,
 	int channel_count)
 {
@@ -114,7 +113,6 @@ static int get_calibrated_re_tcalib(uint32_t *rdc_fix, uint32_t *tv_fix,
 	}
 	return ret;
 }
-#endif /*CONFIG_SET_RE_IN_KERNEL*/
 
 void tas25xx_algo_set_inactive(void)
 {
@@ -235,7 +233,6 @@ static int tas25xx_send_kbin_params(void)
 	}
 
 	return ret;
-
 }
 
 /*Control-1: Set Profile*/
@@ -397,9 +394,7 @@ static int tas25xx_calib_test_set(struct snd_kcontrol *pKcontrol,
 	ret = tas25xx_calib_test_set_common(user_data, CHANNEL0);
 
 	if (ret == 0) {
-#if IS_ENABLED(CONFIG_TAS25XX_ALGO_STEREO)
 		ret = tas25xx_calib_test_set_common(user_data, CHANNEL1);
-#endif
 	}
 
 	return ret;
@@ -572,15 +567,9 @@ static int tas25xx_smartamp_enable_set_kbin(struct snd_kcontrol *pKcontrol,
 	int ret = 0;
 	int param_id = 0;
 	int user_data = pUcontrol->value.integer.value[0];
-#ifdef CONFIG_SET_RE_IN_KERNEL
 	uint32_t calibration_data[3];
-#endif
 
-#ifdef CONFIG_TAS25XX_ALGO_STEREO
 	int number_of_ch = 2;
-#else
-	int number_of_ch = 1;
-#endif
 
 	if (tas25xx_get_algo_bypass()) {
 		pr_info("TI-SmartPA: bypass enabled, not enabling\n");
@@ -666,7 +655,6 @@ static int tas25xx_smartamp_enable_set_kbin(struct snd_kcontrol *pKcontrol,
 
 	s_tas_smartamp_enable = true;
 
-#ifdef CONFIG_SET_RE_IN_KERNEL
 	if (number_of_ch == 2)
 		ret = get_calibrated_re_tcalib(calibration_data,
 				&calibration_data[2], number_of_ch);
@@ -729,7 +717,6 @@ static int tas25xx_smartamp_enable_set_kbin(struct snd_kcontrol *pKcontrol,
 			}
 		}
 	}
-#endif /* CONFIG_SET_RE_IN_KERNEL */
 
 	tas25xx_algo_set_active();
 
@@ -854,7 +841,6 @@ static int tas25xx_set_t_calib(struct snd_kcontrol *pKcontrol,
 	return ret;
 }
 
-#ifdef CONFIG_TAS25XX_ALGO_STEREO
 static int tas25xx_set_Re_right(struct snd_kcontrol *pKcontrol,
 		struct snd_ctl_elem_value *pUcontrol)
 {
@@ -921,7 +907,6 @@ static int tas25xx_get_tv_right(struct snd_kcontrol *pKcontrol,
 
 	return ret;
 }
-#endif
 
 static int tas25xx_smartamp_set_bin_updated(struct snd_kcontrol *pKcontrol,
 		struct snd_ctl_elem_value *pUcontrol)
@@ -966,7 +951,6 @@ static const struct snd_kcontrol_new smartamp_tas25xx_mixer_controls[] = {
 			tas25xx_dummy_get, tas25xx_smartamp_set_bin_updated),
 
 	/*Right*/
-#ifdef CONFIG_TAS25XX_ALGO_STEREO
 	SOC_SINGLE_EXT("TAS25XX_SET_RE_RIGHT", SND_SOC_NOPM, 0, 0x7fffffff, 0,
 			tas25xx_dummy_get, tas25xx_set_Re_right),
 	SOC_SINGLE_EXT("TAS25XX_GET_RE_RIGHT", SND_SOC_NOPM, 0, 0x7fffffff, 0,
@@ -977,7 +961,6 @@ static const struct snd_kcontrol_new smartamp_tas25xx_mixer_controls[] = {
 			tas25xx_get_q_right, tas25xx_dummy_set),
 	SOC_SINGLE_EXT("TAS25XX_GET_TV_RIGHT", SND_SOC_NOPM, 0, 0x7fffffff, 0,
 			tas25xx_get_tv_right, tas25xx_dummy_set),
-#endif
 	SOC_ENUM_EXT("TAS25XX_SMARTPA_ENABLE", tas25xx_smartamp_enable_enum[0],
 			tas25xx_smartamp_enable_get,
 			tas25xx_smartamp_enable_set_kbin),
@@ -998,8 +981,8 @@ void tas_smartamp_add_codec_mixer_controls(struct snd_soc_component *codec)
 
 	snd_soc_add_component_controls(codec, smartamp_tas25xx_mixer_controls,
 		ARRAY_SIZE(smartamp_tas25xx_mixer_controls));
-	INIT_DELAYED_WORK(&query_tisa_algo_wrk, query_tisa_algo);
 
+	INIT_DELAYED_WORK(&query_tisa_algo_wrk, query_tisa_algo);
 }
 EXPORT_SYMBOL(tas_smartamp_add_codec_mixer_controls);
 

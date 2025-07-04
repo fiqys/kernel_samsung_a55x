@@ -39,6 +39,8 @@
 #include <linux/poll.h>
 #include <linux/regulator/consumer.h>
 #include <linux/ioctl.h>
+#include <linux/pinctrl/consumer.h>
+
 #ifdef CONFIG_OF
 #include <linux/of_gpio.h>
 #endif
@@ -49,6 +51,12 @@
 #include <linux/clk.h>
 #ifdef CONFIG_SPI_QCOM_GENI
 #include <linux/spi/spi-geni-qcom.h>
+#endif
+#if IS_ENABLED(CONFIG_SPI_MSM_GENI)
+struct spi_geni_qcom_ctrl_data {
+	u32 spi_cs_clk_delay;
+	u32 spi_inter_words_delay;
+};
 #endif
 
 #include "nfc_wakelock.h"
@@ -156,11 +164,16 @@ struct p3_data {
 	pid_t opened_pid;
 
 	u32 read_1byte_cnt;
+
+#if IS_ENABLED(CONFIG_SAMSUNG_NFC)
+#if IS_ENABLED(CONFIG_SPI_MSM_GENI)
+	struct delayed_work spi_release_work;
+	struct nfc_wake_lock spi_release_wakelock;
+#endif
+#endif
 };
 
-#ifdef CONFIG_MAKE_NODE_USING_PLATFORM_DEVICE
 struct p3_data *g_p3_dev;
-#endif
 
 static void p3_pinctrl_config(struct p3_data *data, bool onoff)
 {
@@ -172,14 +185,22 @@ static void p3_pinctrl_config(struct p3_data *data, bool onoff)
 
 	if (onoff) {
 		/* ON */
+#if IS_ENABLED(CONFIG_SPI_MSM_GENI)
+		pinctrl = devm_pinctrl_get_select(spi_dev, "default");
+#else
 		pinctrl = devm_pinctrl_get_select(spi_dev, "ese_active");
+#endif
 		if (IS_ERR_OR_NULL(pinctrl))
 			P3_ERR_MSG("no ese_active pinctrl %ld\n", PTR_ERR(pinctrl));
 		else
 			devm_pinctrl_put(pinctrl);
 	} else {
 		/* OFF */
+#if IS_ENABLED(CONFIG_SPI_MSM_GENI)
+		pinctrl = devm_pinctrl_get_select(spi_dev, "sleep");
+#else
 		pinctrl = devm_pinctrl_get_select(spi_dev, "ese_suspend");
+#endif
 		if (IS_ERR_OR_NULL(pinctrl))
 			P3_ERR_MSG("no ese_suspend pinctrl %ld\n", PTR_ERR(pinctrl));
 		else
@@ -224,6 +245,18 @@ static int p3_regulator_onoff(struct p3_data *data, int onoff)
 done:
 	return rc;
 }
+
+void p3_power_control(bool onoff)
+{
+	struct p3_data *p3_dev = g_p3_dev;
+
+	if (p3_dev == NULL) {
+		P3_ERR_MSG("%s:data is null\n", __func__);
+		return;
+	}
+	p3_regulator_onoff(p3_dev, onoff);
+}
+EXPORT_SYMBOL(p3_power_control);
 
 static int p3_xfer(struct p3_data *p3_device, struct p3_ioctl_transfer *tr)
 {
@@ -330,17 +363,18 @@ static int spip3_open(struct inode *inode, struct file *filp)
 	struct p3_data *p3_dev = container_of(filp->private_data, struct p3_data, p3_device);
 #endif
 	struct task_struct *task = current;
-	int ret = 0;
 
 	if (p3_dev == NULL) {
 		P3_ERR_MSG("%s: spi probe is not called\n", __func__);
 		return -EAGAIN;
 	}
 
+	mutex_lock(&device_list_lock);
 	/* for defence MULTI-OPEN */
 	if (p3_dev->device_opened) {
 		P3_ERR_MSG("ALREADY opened! try(%d, %s), opened(%d, %s)\n",
 			task->pid, task->comm, p3_dev->opened_pid, p3_dev->opened_task);
+		mutex_unlock(&device_list_lock);
 		return -EBUSY;
 	}
 #ifdef CONFIG_ESE_COLDRESET
@@ -348,7 +382,6 @@ static int spip3_open(struct inode *inode, struct file *filp)
 	trig_nfc_wakeup();
 #endif
 #endif
-	mutex_lock(&device_list_lock);
 	p3_dev->device_opened = true;
 	memcpy(p3_dev->opened_task, task->comm, TASK_COMM_LEN);
 	p3_dev->opened_pid = task->pid;
@@ -357,14 +390,23 @@ static int spip3_open(struct inode *inode, struct file *filp)
 #ifdef FEATURE_ESE_WAKELOCK
 	wake_lock(&p3_dev->ese_lock);
 #endif
+#if IS_ENABLED(CONFIG_SAMSUNG_NFC)
+#if IS_ENABLED(CONFIG_SPI_MSM_GENI)
+	cancel_delayed_work_sync(&p3_dev->spi_release_work);
+#endif
+#endif
+#if !IS_ENABLED(CONFIG_SPI_MSM_GENI)
 	p3_pinctrl_config(p3_dev, true);
+#endif
+#if IS_ENABLED(CONFIG_SAMSUNG_ESE_ONLY)
 	if (!p3_dev->pwr_always_on) {
-		ret = p3_regulator_onoff(p3_dev, 1);
+		int ret = p3_regulator_onoff(p3_dev, 1);
+
 		if (ret < 0)
 			P3_ERR_MSG("%s : failed to turn on LDO()\n", __func__);
 		usleep_range(2000, 2500);
 	}
-
+#endif
 	filp->private_data = p3_dev;
 
 	p3_dev->users++;
@@ -373,11 +415,27 @@ static int spip3_open(struct inode *inode, struct file *filp)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_SAMSUNG_NFC)
+#if IS_ENABLED(CONFIG_SPI_MSM_GENI)
+static void spip3_release_work(struct work_struct *work)
+{
+	struct p3_data *p3_dev = g_p3_dev;
+
+	if (p3_dev == NULL) {
+		NFC_LOG_ERR("%s: spi probe is not called\n", __func__);
+		return;
+	}
+
+	NFC_LOG_INFO("release ese spi\n");
+	p3_pinctrl_config(p3_dev, false); /* for QC AP */
+}
+#endif
+#endif
+
 static int spip3_release(struct inode *inode, struct file *filp)
 {
 	struct p3_data *p3_dev = filp->private_data;
 	struct task_struct *task = current;
-	int ret = 0;
 
 	if (!p3_dev->device_opened) {
 		P3_ERR_MSG("close(%d, %s) - NOT opened\n", task->pid, task->comm);
@@ -397,13 +455,25 @@ static int spip3_release(struct inode *inode, struct file *filp)
 	p3_dev->users--;
 	if (!p3_dev->users) {
 		p3_dev->device_opened = false;
+#if !IS_ENABLED(CONFIG_SPI_MSM_GENI)
 		p3_pinctrl_config(p3_dev, false);
+#endif
+#if IS_ENABLED(CONFIG_SAMSUNG_ESE_ONLY)
 		if (!p3_dev->pwr_always_on) {
-			ret = p3_regulator_onoff(p3_dev, 0);
+			int ret = p3_regulator_onoff(p3_dev, 0);
+
 			if (ret < 0)
 				P3_ERR_MSG("test: failed to turn off LDO()\n");
 		}
+#endif
 	}
+#if IS_ENABLED(CONFIG_SAMSUNG_NFC)
+#if IS_ENABLED(CONFIG_SPI_MSM_GENI)
+	schedule_delayed_work(&p3_dev->spi_release_work,
+				msecs_to_jiffies(2000));
+	wake_lock_timeout(&p3_dev->spi_release_wakelock, 2*HZ);
+#endif
+#endif
 	usleep_range(10000, 15000);
 
 	mutex_unlock(&device_list_lock);
@@ -728,7 +798,7 @@ static int spip3_probe(struct spi_device *spi)
 	struct property *prop;
 	int ese_support = 0;
 
-#ifdef CONFIG_SPI_QCOM_GENI /*SDM845 Only*/
+#if defined(CONFIG_SPI_QCOM_GENI) || IS_ENABLED(CONFIG_SPI_MSM_GENI)
 	struct spi_geni_qcom_ctrl_data *delay_params = NULL;
 #endif
 
@@ -766,6 +836,7 @@ static int spip3_probe(struct spi_device *spi)
 		goto p3_parse_dt_failed;
 	}
 
+#if IS_ENABLED(CONFIG_SAMSUNG_ESE_ONLY)
 	if (data->pwr_always_on) {
 		ret = p3_regulator_onoff(data, 1);
 		if (ret) {
@@ -773,15 +844,16 @@ static int spip3_probe(struct spi_device *spi)
 			goto p3_parse_dt_failed;
 		}
 	}
+#endif
 
-#ifdef CONFIG_SPI_QCOM_GENI /*SDM845 Only*/
+#if defined(CONFIG_SPI_QCOM_GENI) || IS_ENABLED(CONFIG_SPI_MSM_GENI)
 	delay_params = spi->controller_data;
 	if (spi->controller_data)
 		pr_err("%s ctrl data is not empty\n", __func__);
 	delay_params = devm_kzalloc(&spi->dev, sizeof(struct spi_geni_qcom_ctrl_data),
 			GFP_KERNEL);
 	pr_info("%s success alloc ctrl_data!\n", __func__);
-	delay_params->spi_cs_clk_delay = 133; /*clock cycles*/
+	delay_params->spi_cs_clk_delay = 255; /* spec: min 20us. (1/spi_clk)*255 = 21us */
 	delay_params->spi_inter_words_delay = 0;
 	spi->controller_data = delay_params;
 #endif
@@ -828,9 +900,9 @@ static int spip3_probe(struct spi_device *spi)
 		if (ret)
 			P3_ERR_MSG("failed to get gpio cs-gpio\n");
 	}
-
+#if !IS_ENABLED(CONFIG_SPI_MSM_GENI)
 	p3_pinctrl_config(data, false);
-
+#endif
 	data->tx_buffer = kzalloc(sizeof(unsigned char) * MAX_BUFFER_SIZE, GFP_KERNEL);
 	if (data->tx_buffer == NULL) {
 		P3_ERR_MSG("failed to allocate spi tx buf\n");
@@ -844,10 +916,15 @@ static int spip3_probe(struct spi_device *spi)
 		ret = -EINVAL;
 		goto err_alloc_rx_buf;
 	}
-
-#ifdef CONFIG_MAKE_NODE_USING_PLATFORM_DEVICE
-	g_p3_dev = data;
+#if IS_ENABLED(CONFIG_SAMSUNG_NFC)
+#if IS_ENABLED(CONFIG_SPI_MSM_GENI)
+	INIT_DELAYED_WORK(&data->spi_release_work, spip3_release_work);
+	wake_lock_init(&data->spi_release_wakelock, WAKE_LOCK_SUSPEND, "ese_spi_wake_lock");
 #endif
+#endif
+
+	g_p3_dev = data;
+
 	P3_INFO_MSG("%s finished...\n", __func__);
 	return ret;
 err_alloc_rx_buf:

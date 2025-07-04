@@ -19,6 +19,7 @@
 #if defined(CONFIG_USB_HW_PARAM)
 #include <linux/usb_notify.h>
 #endif
+#include <linux/version.h>
 
 struct notify_data {
 	struct class *host_notify_class;
@@ -261,7 +262,11 @@ int host_state_notify(struct host_notify_dev *ndev, int state)
 EXPORT_SYMBOL_GPL(host_state_notify);
 
 static int
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+host_notify_uevent(const struct device *dev, struct kobj_uevent_env *env)
+#else
 host_notify_uevent(struct device *dev, struct kobj_uevent_env *env)
+#endif
 {
 	struct host_notify_dev *ndev = (struct host_notify_dev *)
 		dev_get_drvdata(dev);
@@ -320,7 +325,11 @@ static int create_notify_class(void)
 {
 	if (!host_notify.host_notify_class) {
 		host_notify.host_notify_class
-			= class_create(THIS_MODULE, "host_notify");
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
+			= class_create("host_notify");
+#else
+			= class_create(THIS_MODULE,"host_notify");
+#endif
 		if (IS_ERR(host_notify.host_notify_class))
 			return PTR_ERR(host_notify.host_notify_class);
 		atomic_set(&host_notify.device_count, 0);

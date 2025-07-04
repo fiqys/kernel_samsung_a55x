@@ -20,7 +20,6 @@
  * =============================================================================
  */
 
-#define DEBUG
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
@@ -44,12 +43,14 @@
 #include <linux/dma-mapping.h>
 
 #define FMT "%02x: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n"
+#define MAX_FMT_COUNT 512
 
 enum tas_devop_t {
 	OP_REG_READ = 0,
 	OP_PAGE_READ = 1,
 	OP_SNG_WRITE = 2,
 	OP_BURST_WRITE = 3,
+	OP_BF_UPDATE = 4,
 };
 
 struct tas_audio_dev {
@@ -60,7 +61,6 @@ struct tas_audio_dev {
 	uint8_t read_pending;
 	enum tas_devop_t op;
 };
-
 
 static struct tas_audio_dev s_tasdevop;
 static uint32_t s_r[128];
@@ -91,21 +91,30 @@ static ssize_t tas25xx_file_read(struct file *file,
 	struct tas25xx_priv *p_tas25xx =
 		(struct tas25xx_priv *)file->private_data;
 	int32_t ret = 0, i, count_l;
-	uint8_t  *p_kbuf = NULL;
-	uint32_t  reg = 0;
-	uint32_t  len = 0;
-	uint32_t  value = 0;
-	uint32_t  channel = 0;
+	uint8_t *p_kbuf = NULL;
+	uint32_t reg = 0;
+	uint32_t len = 0;
+	uint32_t value = 0;
+	int32_t channel = 0;
 
 	mutex_lock(&p_tas25xx->file_lock);
 
-	pr_info("%s size=%zu", __func__, count);
+	pr_info("%s size=%zu\n", __func__, count);
 
 	if (count > 8) {
+		uint8_t *ref_ptr;
+
 		if (!s_tasdevop.read_pending) {
 			count = 0;
 			goto done_read;
 		}
+
+		p_kbuf = kzalloc(MAX_FMT_COUNT, GFP_KERNEL);
+		if (p_kbuf == NULL)
+			goto done_read;
+
+		ref_ptr = p_kbuf;
+
 		channel = s_tasdevop.channel;
 		pr_info("%s ch=%d B:P %02x:%02x\n",
 			__func__, channel, s_tasdevop.book, s_tasdevop.page);
@@ -116,12 +125,19 @@ static ssize_t tas25xx_file_read(struct file *file,
 			ret = p_tas25xx->read(p_tas25xx, channel,
 				reg, &value);
 			if (ret < 0)
-				count = snprintf(buf, 64, "%s\n", "Error");
+				count = snprintf(ref_ptr, 64, "%s\n", "Error");
 			else
-				count = snprintf(buf, 64, "%02x\n", value);
-			pr_info("%s ch=%d B:P:R %02x:%02x:%02x(%d) value=%d\n",
-				__func__, channel, s_tasdevop.book,
-				s_tasdevop.page, s_tasdevop.reg, reg, value);
+				count = snprintf(ref_ptr, 64, "%02x\n", value);
+
+			ret = copy_to_user(buf, ref_ptr, count);
+			if (ret) {
+				pr_err("TAS25XX:%d reg read, copy to user buf ret= %d\n", __LINE__, ret);
+				count = ret;
+			} else {
+				pr_info("TAS25XX: %s ch=%d B:P:R %02x:%02x:%02x(%d) value=%d\n",
+					__func__, channel, s_tasdevop.book, s_tasdevop.page,
+					s_tasdevop.reg, reg, value);
+			}
 			break;
 
 		case OP_PAGE_READ:
@@ -134,90 +150,109 @@ static ssize_t tas25xx_file_read(struct file *file,
 					break;
 				}
 			}
+			p_tas25xx->read(p_tas25xx, channel, reg, &s_r[0]);
 
 			if (ret) {
-				count = snprintf(buf, 64, "error=%d\n", ret);
+				count = snprintf(ref_ptr, 64, "error=%d\n", ret);
 			} else {
 				count_l = 0;
 				if (count < ((52*8)+1)) {
-					count = snprintf(buf, 64,
+					count = snprintf(ref_ptr, 64,
 						"page dump not possible\n");
 				} else {
 					for (i = 0; i < 8; i++) {
-						count_l += snprintf(buf, 64, FMT, i, s_r[(i*16) + 0],
+						count_l += snprintf(ref_ptr, 64, FMT, i, s_r[(i*16) + 0],
 							s_r[(i*16) + 1], s_r[(i*16) + 2], s_r[(i*16) + 3], s_r[(i*16) + 4],
 							s_r[(i*16) + 5], s_r[(i*16) + 6], s_r[(i*16) + 7], s_r[(i*16) + 8],
 							s_r[(i*16) + 9], s_r[(i*16) + 10], s_r[(i*16) + 11], s_r[(i*16) + 12],
 							s_r[(i*16) + 13], s_r[(i*16) + 14], s_r[(i*16) + 15]);
-						buf += 52;
+						ref_ptr += 52;
 					}
 					count = count_l;
 				}
 			}
+
+			ret = copy_to_user(buf, p_kbuf, count);
+			if (ret) {
+				pr_err("TAS25XX:%s page read, copy buffer failed.\n", __func__);
+				count = ret;
+			}
 			break;
 
 		default:
-			count = snprintf(buf, 64, "%s\n", "invalid op");
+			count = snprintf(p_kbuf, 64, "%s\n", "invalid op");
+			ret = copy_to_user(buf, p_kbuf, count);
+			if (ret) {
+				pr_err("TAS25XX:%s invalid op, copy buffer failed.\n", __func__);
+				count = ret;
+			}
 			break;
 		}
 
 		s_tasdevop.read_pending = 0;
 		goto done_read;
-	}
+	} else if (count == 7) {
 
-	p_kbuf = kzalloc(count, GFP_KERNEL);
-	if (p_kbuf == NULL)
-		goto done_read;
+		p_kbuf = kzalloc(count, GFP_KERNEL);
+		if (p_kbuf == NULL)
+			goto done_read;
 
-	ret = copy_from_user(p_kbuf, buf, count);
-	if (ret != 0) {
-		pr_err("TAS25XX copy_from_user failed.\n");
-		goto done_read;
-	}
+		ret = copy_from_user(p_kbuf, buf, count);
+		if (ret != 0) {
+			pr_err("TAS25XX copy_from_user failed.\n");
+			count = ret;
+			goto done_read;
+		}
 
-	if ((p_kbuf[1] >= 0) && ((p_kbuf[1] <= 1)))
+		if (p_kbuf[1] >= p_tas25xx->ch_count)
+			goto done_read;
+
 		channel = p_kbuf[1];
 
-	switch (p_kbuf[0]) {
-	case TIAUDIO_CMD_REG_READ:
-	{
-		reg = ((uint32_t)p_kbuf[2] << 24) +
-			((uint32_t)p_kbuf[3] << 16) +
-			((uint32_t)p_kbuf[4] << 8) +
-			(uint32_t)p_kbuf[5];
+		switch (p_kbuf[0]) {
+		case TIAUDIO_CMD_REG_READ:
+			reg = ((uint32_t)p_kbuf[2] << 24) +
+				((uint32_t)p_kbuf[3] << 16) +
+				((uint32_t)p_kbuf[4] << 8) +
+				(uint32_t)p_kbuf[5];
 
-		pr_info("TAS25XX TIAUDIO_CMD_REG_READ: current_reg = 0x%x, count=%d\n",
-			reg, (int)count-6);
-		len = count-6;
-		if (len == 1) {
-			uint32_t  value = 0;
+			pr_info("TAS25XX TIAUDIO_CMD_REG_READ: current_reg = 0x%x, count=%d\n",
+				reg, (int)count-6);
+			len = count-6;
+			if (len == 1) {
+				value = 0;
 
-			ret = p_tas25xx->read(p_tas25xx, channel,
-				reg, &value);
-			if (ret < 0) {
-				pr_err("TAS25XX dev read fail %d\n", ret);
-				break;
-			}
-			p_kbuf[6] = value;
-			ret = copy_to_user(buf, p_kbuf, count);
-			/* Failed to copy all the data, exit */
-			if (ret != 0)
-				pr_err("TAS25XX copy to user fail %d\n", ret);
-		} else if (len > 1) {
-			ret = p_tas25xx->bulk_read(p_tas25xx, channel,
-				reg, (uint8_t  *)&p_kbuf[6], len);
-			if (ret < 0) {
-				pr_err("TAS25XX dev bulk read fail %d\n", ret);
-			} else {
+				ret = p_tas25xx->read(p_tas25xx, channel,
+					reg, &value);
+				if (ret < 0) {
+					pr_err("TAS25XX dev read fail %d\n", ret);
+					break;
+				}
+				p_kbuf[6] = value;
 				ret = copy_to_user(buf, p_kbuf, count);
-				/* Failed to copy all the data, exit */
-				if (ret != 0)
-					pr_err("TAS25XX copy to user fail %d\n",
-						ret);
+				if (ret) {
+					count = ret;
+					pr_err("TAS25XX TIAUDIO_CMD_REG_READ copy to user %d\n", ret);
+				}
+			} else if (len > 1) {
+				ret = p_tas25xx->bulk_read(p_tas25xx, channel,
+					reg, (uint8_t  *)&p_kbuf[6], len);
+				if (ret < 0) {
+					pr_err("TAS25XX dev bulk read fail %d\n", ret);
+				} else {
+					ret = copy_to_user(buf, p_kbuf, count);
+					if (ret) {
+						count = ret;
+						pr_err("TAS25XX TIAUDIO_CMD_REG_READ copy to user fail %d\n",
+							ret);
+					}
+				}
 			}
+		break;
 		}
-	}
-	break;
+	} else {
+		pr_err("TAS25XX:%d invalid size %zu\n", __LINE__, count);
+		goto done_read;
 	}
 
 done_read:
@@ -230,9 +265,9 @@ static int32_t handle_read_write(struct tas25xx_priv *p_tas25xx,
 	int32_t read_write_op, int32_t count, uint8_t *buf)
 {
 	static uint8_t ch_bpr[8] = {0};
-	int32_t val, buf_sz, i;
+	int32_t mask, val, buf_sz, i;
 	int32_t ret = 0;
-	int32_t reg;
+	int32_t reg = 0;
 	int8_t l_buf[3];
 
 	buf_sz = count - 2;
@@ -242,8 +277,11 @@ static int32_t handle_read_write(struct tas25xx_priv *p_tas25xx,
 	l_buf[2] = 0;
 	while (buf_sz >= 2) {
 		memcpy(l_buf, buf, 2);
-		if (kstrtoint(l_buf, 16, &val) != 0)
-			return -EINVAL;
+		ret = kstrtoint(l_buf, 16, &val);
+		if (ret) {
+			pr_err("TAS25XX:%d Parsing err for %s, err=%d\n", __LINE__, l_buf, ret);
+			break;
+		}
 		if (i <= 7) {
 			pr_info("tas25xx: %s i=%d, val=%d\n", __func__, i, val);
 			ch_bpr[i] = (uint8_t)val;
@@ -256,9 +294,17 @@ static int32_t handle_read_write(struct tas25xx_priv *p_tas25xx,
 		i++;
 	}
 
+	if (ret)
+		goto read_write_done;
+
 	pr_info("tas25xx: ch=%d, BPR %02x:%02x:%02x v=%d %d %d %d(cnt=%d)\n",
 		ch_bpr[0], ch_bpr[1], ch_bpr[2], ch_bpr[3],
 		ch_bpr[4], ch_bpr[5], ch_bpr[6], ch_bpr[7], i);
+
+	if (ch_bpr[0] >= p_tas25xx->ch_count) {
+		ret = -EINVAL;
+		goto read_write_done;
+	}
 
 	s_tasdevop.channel = ch_bpr[0];
 	s_tasdevop.book = ch_bpr[1];
@@ -278,6 +324,7 @@ static int32_t handle_read_write(struct tas25xx_priv *p_tas25xx,
 			s_tasdevop.op = OP_REG_READ;
 		} else {
 			pr_info("tas25xx: page/single read is supported\n");
+			s_tasdevop.read_pending = 0;
 			ret = -EINVAL;
 		}
 	} else if (read_write_op == 2) {
@@ -288,7 +335,15 @@ static int32_t handle_read_write(struct tas25xx_priv *p_tas25xx,
 			pr_info("tas25xx: burst write\n");
 			s_tasdevop.op = OP_BURST_WRITE;
 		} else {
-			pr_info("tas25xx: signle/burst write is supported\n");
+			pr_info("tas25xx: single/burst write is supported\n");
+			ret = -EINVAL;
+		}
+	} else if (read_write_op == 3) {
+		if (i == 6) {
+			pr_info("tas25xx: bitfield update\n");
+			s_tasdevop.op = OP_BF_UPDATE;
+		} else {
+			pr_info("tas25xx: bitfield update is supported\n");
 			ret = -EINVAL;
 		}
 	} else {
@@ -296,18 +351,27 @@ static int32_t handle_read_write(struct tas25xx_priv *p_tas25xx,
 		ret = -EINVAL;
 	}
 
+	reg = TAS25XX_REG(s_tasdevop.book, s_tasdevop.page, s_tasdevop.reg);
+
 	if (read_write_op == 2) {
-		val = ch_bpr[4];
-		reg = TAS25XX_REG(s_tasdevop.book, s_tasdevop.page, s_tasdevop.reg);
 		if (s_tasdevop.op == OP_SNG_WRITE) {
+			val = ch_bpr[4];
 			ret = p_tas25xx->write(p_tas25xx,
 					s_tasdevop.channel, reg, val);
 		} else if (s_tasdevop.op == OP_BURST_WRITE) {
 			ret = p_tas25xx->bulk_write(p_tas25xx,
 				s_tasdevop.channel, reg, &ch_bpr[4], 4);
 		}
+	} else if (read_write_op == 3) {
+		if (s_tasdevop.op == OP_BF_UPDATE) {
+			mask = ch_bpr[4];
+			val = ch_bpr[5];
+			ret = p_tas25xx->update_bits(p_tas25xx,
+				s_tasdevop.channel, reg, mask, val);
+		}
 	}
 
+read_write_done:
 	if (ret < 0)
 		count = ret;
 
@@ -320,15 +384,15 @@ static ssize_t tas25xx_file_write(struct file *file,
 	struct tas25xx_priv *p_tas25xx =
 		(struct tas25xx_priv *)file->private_data;
 	int32_t ret = 0;
-	uint8_t  *p_kbuf = NULL;
-	uint32_t  reg = 0;
-	uint32_t  len = 0;
-	uint32_t  channel = 0;
+	uint8_t *p_kbuf = NULL;
+	uint32_t reg = 0;
+	uint32_t len = 0;
+	int32_t channel = 0;
 	int32_t read_write_op;
 
 	mutex_lock(&p_tas25xx->file_lock);
 
-	pr_info("%s size=%zu", __func__, count);
+	pr_info("%s size=%zu\n", __func__, count);
 
 	if (count < 7) {
 		pr_err("TAS25XX invalid size %zu\n", count);
@@ -344,14 +408,17 @@ static ssize_t tas25xx_file_write(struct file *file,
 
 	ret = copy_from_user(p_kbuf, buf, count);
 	if (ret != 0) {
+		count = ret;
 		pr_err("TAS25XX copy_from_user failed.\n");
 		goto done_write;
 	}
 
-	if (p_kbuf[0] == 'w' || p_kbuf[1] == 'W')
+	if ((p_kbuf[0] == 'w' || p_kbuf[0] == 'W') && p_kbuf[1] == ' ')
 		read_write_op = 2;
-	else if (p_kbuf[0] == 'r' || p_kbuf[1] == 'R')
+	else if ((p_kbuf[0] == 'r' || p_kbuf[0] == 'R') && p_kbuf[1] == ' ')
 		read_write_op = 1;
+	else if ((p_kbuf[0] == 'b' || p_kbuf[0] == 'B') && p_kbuf[1] == ' ')
+		read_write_op = 3;
 	else
 		read_write_op = 0;
 
@@ -360,8 +427,12 @@ static ssize_t tas25xx_file_write(struct file *file,
 		goto done_write;
 	}
 
-	if ((p_kbuf[1] >= 0) && ((p_kbuf[1] <= 1)))
-		channel = p_kbuf[1]+1;
+	if (p_kbuf[1] >= p_tas25xx->ch_count) {
+		pr_err("TAS25XX: channel count exceeds actual chanel count\n");
+		goto done_write;
+	}
+	channel = p_kbuf[1];
+
 	switch (p_kbuf[0]) {
 	case TIAUDIO_CMD_REG_WITE:
 		if (count > 5) {

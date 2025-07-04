@@ -24,6 +24,8 @@
 
 #include "tas25xx.h"
 
+int tas25xx_start_fw_load(struct tas25xx_priv *p_tas25xx, int retry_count);
+
 int tas25xx_register_codec(struct tas25xx_priv *p_tas25xx);
 int tas25xx_deregister_codec(struct tas25xx_priv *p_tas25xx);
 

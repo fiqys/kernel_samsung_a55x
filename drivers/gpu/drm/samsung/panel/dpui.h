@@ -63,6 +63,10 @@ enum dpui_key {
 	DPUI_KEY_MAID_DATE,	/* panel manufacture date */
 	DPUI_KEY_CELLID,	/* panel cell id */
 	DPUI_KEY_OCTAID,	/* panel octa id */
+	DPUI_KEY_CHIPID,
+	DPUI_KEY_SUB_CELLID,
+	DPUI_KEY_SUB_OCTAID,
+	DPUI_KEY_SUB_CHIPID,
 	DPUI_KEY_PNDSIE,	/* panel dsi error count */
 	DPUI_KEY_PNELVDE,	/* panel ELVDD error count */
 	DPUI_KEY_PNVLI1E,	/* panel VLIN1 error count */
@@ -84,6 +88,7 @@ enum dpui_key {
 	DPUI_KEY_PNGFLS,	/* panel gamma flash loading result */
 #endif
 	DPUI_KEY_UB_CON,		/* panel ub_con(con_det) pin interrupt count */
+
 
 	/* dependent on processor */
 	DPUI_KEY_EXY_SWRCV,	/* exynos sw recovery count */

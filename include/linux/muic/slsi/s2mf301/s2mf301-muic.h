@@ -28,6 +28,8 @@
 #include <linux/pm_wakeup.h>
 
 #define MUIC_DEV_NAME   "muic-s2mf301"
+#define POGO_DOCK_INT_ACTIVE_LOW 0
+#define POGO_DOCK_INT_ACTIVE_HIGH 1
 
 
 enum s2mf301_muic_registers {
@@ -457,6 +459,7 @@ struct s2mf301_pm_rid_ops {
 struct s2mf301_top_rid_ops {
 	int		(*set_jig_on)(void *_data, bool enable);
 	int		(*mask_rid_change)(void *_data, bool enable);
+	u8		(*get_dummy_rid)(void *_data);
 	void		*_data;
 };
 
@@ -565,6 +568,7 @@ struct s2mf301_muic_data {
 	/* Pogo dock gpio */
 	int gpio_dock;
 	int irq_dock;
+	int pogo_dock_int_active_value;
 #endif
 	struct muic_share_data *sdata;
 	int pcp_clk_delayed;

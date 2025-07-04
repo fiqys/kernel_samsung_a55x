@@ -205,11 +205,21 @@ static int star_dev_open(struct inode *inode, struct file *filp)
 			sec_star_t, misc);
 	int ret = 0;
 
-	INFO("star_open\n");
-
 	mutex_lock(&(star->lock));
-
+	INFO("star_open %d\n", star->access);
 	filp->private_data = star;
+
+	if (filp->f_flags & O_NONBLOCK) {
+		//reset the chip and allow every open
+		iso7816_t1_reset(star->protocol);
+		ret = star->dev->force_off();
+		if (ret) {
+			mutex_unlock(&(star->lock));
+			return ret;
+		}
+
+		star->access = 0;
+	}
 
 	if (star->access == 0) {
 #ifdef FEATURE_STAR_WAKELOCK
@@ -221,20 +231,23 @@ static int star_dev_open(struct inode *inode, struct file *filp)
 		iso7816_t1_reset(star->protocol);
 
 		ret = star->dev->power_on();
-		if (ret < 0) {
+		if (ret) {
 #ifdef FEATURE_STAR_WAKELOCK
 			if (wake_lock_active(&star->snvm_wake_lock)) {
 				wake_unlock(&star->snvm_wake_lock);
 				INFO("called to snvm_wake_unlock\n");
 			}
 #endif
-			ERR("%s :failed to open star", __func__);
+			ERR("%s: failed to open star\n", __func__);
 			mutex_unlock(&(star->lock));
 			return ret;
 		}
+		star->access = 1;
+	} else {
+		ERR("%s: failed to open star, already opened\n", __func__);
+		mutex_unlock(&(star->lock));
+		return -EBUSY;
 	}
-
-	star->access++;
 
 	mutex_unlock(&(star->lock));
 	return 0;
@@ -245,7 +258,6 @@ static int star_dev_close(struct inode *inode, struct file *filp)
 	sec_star_t *star = (sec_star_t *)filp->private_data;
 	int ret = 0;
 
-	INFO("star_close\n");
 
 	if (star == NULL) {
 		return -EINVAL;
@@ -253,20 +265,22 @@ static int star_dev_close(struct inode *inode, struct file *filp)
 
 	mutex_lock(&(star->lock));
 
-	star->access--;
+	INFO("star_close %d\n", star->access);
 
-	if (star->access == 0) {
+	if (star->access) {
 		ret = star->dev->power_off();
-		if (ret < 0)
-			ERR("%s :failed power_off", __func__);
+		if (ret)
+			ERR("%s: failed power_off\n", __func__);
+
+		star->access = 0;
+	}
 
 #ifdef FEATURE_STAR_WAKELOCK
-		if (wake_lock_active(&star->snvm_wake_lock)) {
-			wake_unlock(&star->snvm_wake_lock);
-			INFO("called to snvm_wake_unlock\n");
-		}
-#endif
+	if (wake_lock_active(&star->snvm_wake_lock)) {
+		wake_unlock(&star->snvm_wake_lock);
+		INFO("called to snvm_wake_unlock\n");
 	}
+#endif
 
 	mutex_unlock(&(star->lock));
 	return ret;

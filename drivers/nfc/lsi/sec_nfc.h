@@ -66,6 +66,7 @@ struct sec_nfc_platform_data {
 	unsigned int avdd;
 	bool clk_req_wake;
 	bool irq_all_trigger;
+	bool eint_mode;
 #ifdef CONFIG_ESE_COLDRESET
   unsigned int coldreset;
 #endif

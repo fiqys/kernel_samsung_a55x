@@ -9,7 +9,7 @@
  * GNU General Public License for more details.
  */
 
-#if 1
+#if 0
 #if 0
 &${ese_check_parent} {
 	ese_check_default: ese_check_default {
@@ -20,9 +20,9 @@
 };
 #endif
 
-&pinctrl_3 {
+&${ese_spi_parent} {
 	ese_spi_bus_suspend: ese_spi_bus_suspend {
-		samsung,pins = SEC_GPIO(AP,gpp0,gpp0,0), SEC_GPIO(AP,gpp0,gpp0,1), SEC_GPIO(AP,gpp0,gpp0,2);
+		samsung,pins = SEC_GPIO(${ese_spi_clk}), SEC_GPIO(${ese_spi_mosi}), SEC_GPIO(${ese_spi_miso});
 		samsung,pin-function = <0>; /* INPUT */
 		samsung,pin-pud = <PIN_PULL_DOWN>; /* DOWN */
 		samsung,pin-drv = <PIN_AP_DRV_LV1>;
@@ -31,7 +31,7 @@
 	};
 
 	ese_spi_cs_suspend: ese_spi_cs_suspend {
-		samsung,pins = SEC_GPIO(AP,gpp0,gpp0,3);
+		samsung,pins = SEC_GPIO(${ese_spi_cs});
 		samsung,pin-function = <1>; /* OUTPUT */
 		samsung,pin-pud = <PIN_PULL_NONE>; /* NONE */
 		samsung,pin-drv = <PIN_AP_DRV_LV1>;
@@ -41,21 +41,21 @@
 	};
 
 	ese_spi_bus: ese_spi_bus {
-		samsung,pins = SEC_GPIO(AP,gpp0,gpp0,0), SEC_GPIO(AP,gpp0,gpp0,1), SEC_GPIO(AP,gpp0,gpp0,2);
+		samsung,pins = SEC_GPIO(${ese_spi_clk}), SEC_GPIO(${ese_spi_mosi}), SEC_GPIO(${ese_spi_miso});
 		samsung,pin-function = <2>;
 		samsung,pin-pud = <PIN_PULL_NONE>;
 		samsung,pin-drv = <PIN_AP_DRV_LV1>;
 	};
 
 	ese_spi_cs: ese_spi_cs {
-		samsung,pins = SEC_GPIO(AP,gpp0,gpp0,3);
+		samsung,pins = SEC_GPIO(${ese_spi_cs});
 		samsung,pin-function = <1>;
 		samsung,pin-pud = <PIN_PULL_NONE>;
 		samsung,pin-drv = <PIN_AP_DRV_LV1>;
 	};
 };
 
-&spi_0 {
+&${ese_spi} {
 	status = "ok";
 	pinctrl-names = "ese_active", "ese_suspend";
 	pinctrl-0 = <&ese_spi_bus &ese_spi_cs>;
@@ -80,7 +80,7 @@
 #if 0
 		p3-vdd-supply = <&${ese_pvdd_ldo}>;
 #endif
-		ese_p3,cs-gpio = <SEC_GPIO_REF(AP,gpp0,gpp0,3) 0>;
+		ese_p3,cs-gpio = <SEC_GPIO_REF(${ese_spi_cs}) 0>;
 		controller-data {
 			samsung,spi-feedback-delay = <0>;
 			samsung,spi-chip-select-mode = <0>;
@@ -89,7 +89,8 @@
 };
 
 #if 0
-	regulator-name = "ese_pvdd";
+&${ese_pvdd_ldo} {
+	regulator-name = "p3-vdd";
 };
 #endif
 
@@ -121,7 +122,7 @@
 		samsung,pin-pud-pdn = <PIN_PULL_NONE>;
 	};
 
-#if 1
+#if 0
 	nfc_i2c_no_change: nfc_i2c_no_change {
 		samsung,pins = SEC_GPIO(AP,gpp1,gpp1,2), SEC_GPIO(AP,gpp1,gpp1,3);
 		samsung,pin-function = <3>;
@@ -209,7 +210,7 @@
 	clock-frequency = <400000>; /* for HSI2C */
 	samsung,i2c-max-bus-freq = <400000>; /* for Normal HW I2C */
 	samsung,reset-before-trans;
-#if 1
+#if 0
 	pinctrl-names = "default", "i2c_pull_up";
 	pinctrl-0 = <&nfc_i2c_no_change>;
 	pinctrl-1 = <&nfc_i2c_pull_up>;
@@ -236,8 +237,8 @@
 		sec-nfc,check_nfc = <SEC_GPIO_REF(${nfc_check}) 0>;
 #endif
 		sec-nfc,clk_req-gpio = <SEC_GPIO_REF(AP,gpa1,gpa1,1) 0xf>;
-#if 1
-		sec-nfc,coldreset-gpio = <SEC_GPIO_REF(AP,gpp1,gpp1,1) 0>;
+#if 0
+		sec-nfc,coldreset-gpio = <SEC_GPIO_REF(${ese_reset}) 0>;
 #endif
 		nfc_pvdd-supply = <&fixed_regulator0>;
 
@@ -245,6 +246,9 @@
 
 #if 0
 		sec-nfc,irq_all_trigger;
+#endif
+#if 0
+		sec-nfc,eint_mode;
 #endif
 #if 0
 		clocks = <&clock OSC_NFC>;

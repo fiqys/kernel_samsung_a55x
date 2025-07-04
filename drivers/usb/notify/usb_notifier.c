@@ -30,7 +30,9 @@
 #if IS_ENABLED(CONFIG_USB_TYPEC_MANAGER_NOTIFIER)
 #include <linux/usb/typec/manager/usb_typec_manager_notifier.h>
 #endif
+#if IS_ENABLED(CONFIG_BATTERY_SAMSUNG)
 #include <linux/battery/sec_battery_common.h>
+#endif
 #include "usb_notifier.h"
 
 #include <linux/regulator/consumer.h>
@@ -39,7 +41,7 @@
 struct usb_notifier_platform_data {
 #if IS_ENABLED(CONFIG_PDIC_NOTIFIER)
 	struct	notifier_block ccic_usb_nb;
-	int is_host;
+	int is_data_role;
 #endif
 #if IS_ENABLED(CONFIG_MUIC_NOTIFIER)
 	struct	notifier_block muic_usb_nb;
@@ -395,26 +397,27 @@ static int ccic_usb_handle_notification(struct notifier_block *nb,
 	switch (usb_status.drp) {
 	case USB_STATUS_NOTIFY_ATTACH_DFP:
 		pr_info("%s: Turn On Host(DFP)\n", __func__);
+		if (pdata->is_data_role == USB_STATUS_NOTIFY_ATTACH_UFP)
+			send_otg_notify(o_notify, NOTIFY_EVENT_VBUS, 0);
 		send_otg_notify(o_notify, NOTIFY_EVENT_HOST, 1);
-		pdata->is_host = 1;
+		pdata->is_data_role = USB_STATUS_NOTIFY_ATTACH_DFP;
 		break;
 	case USB_STATUS_NOTIFY_ATTACH_UFP:
 		pr_info("%s: Turn On Device(UFP)\n", __func__);
+		if (pdata->is_data_role == USB_STATUS_NOTIFY_ATTACH_DFP)
+			send_otg_notify(o_notify, NOTIFY_EVENT_HOST, 0);
 		send_otg_notify(o_notify, NOTIFY_EVENT_VBUS, 1);
-#ifdef CONFIG_DISABLE_LOCKSCREEN_USB_RESTRICTION
-		if (is_blocked(o_notify, NOTIFY_BLOCK_TYPE_CLIENT))
-			return -EPERM;
-#endif
+		pdata->is_data_role = USB_STATUS_NOTIFY_ATTACH_UFP;
 		break;
 	case USB_STATUS_NOTIFY_DETACH:
-		if (pdata->is_host) {
+		if (pdata->is_data_role == USB_STATUS_NOTIFY_ATTACH_DFP) {
 			pr_info("%s: Turn Off Host(DFP)\n", __func__);
 			send_otg_notify(o_notify, NOTIFY_EVENT_HOST, 0);
-			pdata->is_host = 0;
 		} else {
 			pr_info("%s: Turn Off Device(UFP)\n", __func__);
 			send_otg_notify(o_notify, NOTIFY_EVENT_VBUS, 0);
 		}
+		pdata->is_data_role = USB_STATUS_NOTIFY_DETACH;
 		break;
 	default:
 		pr_info("%s: unsupported DRP type : %d.\n", __func__, usb_status.drp);
@@ -590,6 +593,7 @@ static int vbus_handle_notification(struct notifier_block *nb,
 
 static int otg_accessory_power(bool enable)
 {
+#if IS_ENABLED(CONFIG_BATTERY_SAMSUNG)
 	u8 on = (u8)!!enable;
 	union power_supply_propval val;
 
@@ -598,10 +602,12 @@ static int otg_accessory_power(bool enable)
 	val.intval = enable;
 	psy_do_property("otg", set,
 			POWER_SUPPLY_PROP_ONLINE, val);
+#endif
 
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_BATTERY_SAMSUNG)
 static int set_online(int event, int state)
 {
 	union power_supply_propval val;
@@ -657,6 +663,7 @@ static int set_online(int event, int state)
 
 	return 0;
 }
+#endif
 
 static int exynos_set_host(bool enable)
 {
@@ -771,6 +778,7 @@ static int is_skip_list(int index)
 }
 #endif
 
+#if IS_ENABLED(CONFIG_BATTERY_SAMSUNG)
 static int reverse_bypass_power(int mode)
 {
 	union power_supply_propval val;
@@ -790,6 +798,7 @@ static int reverse_bypass_power(int mode)
 
 	return ret;
 }
+#endif
 
 static int get_support_reverse_bypass_en(void *data)
 {
@@ -801,7 +810,9 @@ static int get_support_reverse_bypass_en(void *data)
 
 static struct otg_notify dwc_lsi_notify = {
 	.vbus_drive	= otg_accessory_power,
+#if IS_ENABLED(CONFIG_BATTERY_SAMSUNG)
 	.reverse_bypass_drive = reverse_bypass_power,
+#endif
 	.get_support_reverse_bypass_en = get_support_reverse_bypass_en,
 	.set_host = exynos_set_host,
 	.set_peripheral	= exynos_set_peripheral,
@@ -814,7 +825,9 @@ static struct otg_notify dwc_lsi_notify = {
 #endif
 	.disable_control = 1,
 	.device_check_sec = 3,
+#if IS_ENABLED(CONFIG_BATTERY_SAMSUNG)
 	.set_battcall = set_online,
+#endif
 #if IS_ENABLED(CONFIG_PDIC_NOTIFIER)
 	.set_ldo_onoff = usb_regulator_onoff,
 #endif
@@ -862,7 +875,7 @@ static int usb_notifier_probe(struct platform_device *pdev)
 #endif
 
 #if IS_ENABLED(CONFIG_PDIC_NOTIFIER)
-	pdata->is_host = 0;
+	pdata->is_data_role = USB_STATUS_NOTIFY_DETACH;
 #if IS_ENABLED(CONFIG_USB_TYPEC_MANAGER_NOTIFIER)
 	manager_notifier_register(&pdata->ccic_usb_nb, ccic_usb_handle_notification,
 					MANAGER_NOTIFY_PDIC_USB);

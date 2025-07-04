@@ -6871,7 +6871,6 @@ int slsi_read_regulatory_rules(struct slsi_dev *sdev, struct slsi_802_11d_reg_do
 	int i = 0;
 	int country_index = 0;
 	struct ieee80211_reg_rule *reg_rule = NULL;
-	int num_rules = 0;
 
 	if ((sdev->regdb.regdb_state == SLSI_REG_DB_NOT_SET) || (sdev->regdb.regdb_state == SLSI_REG_DB_ERROR)) {
 		SLSI_ERR(sdev, "Regulatory is not set!\n");
@@ -6890,30 +6889,28 @@ int slsi_read_regulatory_rules(struct slsi_dev *sdev, struct slsi_802_11d_reg_do
 	domain_info->regdomain->dfs_region = sdev->regdb.country[country_index].operating_class_set;
 
 	for (i = 0; i < sdev->regdb.country[country_index].collection->reg_rule_num; i++) {
-		if (sdev->regdb.country[country_index].collection->reg_rule[i]->flags & SLSI_REGULATORY_DUP_RULE)
-			break;
-		reg_rule = &domain_info->regdomain->reg_rules[num_rules++];
+		reg_rule = &domain_info->regdomain->reg_rules[i];
 
 		/* start freq 2 bytes */
-		reg_rule->freq_range.start_freq_khz = sdev->regdb.country[country_index].collection->reg_rule[i]->freq_range->start_freq * 1000;
+		reg_rule->freq_range.start_freq_khz = (sdev->regdb.country[country_index].collection->reg_rule[i]->freq_range->start_freq * 1000);
 
 		/* end freq 2 bytes */
-		reg_rule->freq_range.end_freq_khz = sdev->regdb.country[country_index].collection->reg_rule[i]->freq_range->end_freq * 1000;
+		reg_rule->freq_range.end_freq_khz = (sdev->regdb.country[country_index].collection->reg_rule[i]->freq_range->end_freq * 1000);
 
 		/* Max Bandwidth 1 byte */
-		reg_rule->freq_range.max_bandwidth_khz = sdev->regdb.country[country_index].collection->reg_rule[i]->freq_range->max_bandwidth * 1000;
+		reg_rule->freq_range.max_bandwidth_khz = (sdev->regdb.country[country_index].collection->reg_rule[i]->freq_range->max_bandwidth * 1000);
 
 		/* max_antenna_gain is obsolete now. */
 		reg_rule->power_rule.max_antenna_gain = 0;
 
 		/* Max Power 1 byte */
-		reg_rule->power_rule.max_eirp = sdev->regdb.country[country_index].collection->reg_rule[i]->max_eirp * 100;
+		reg_rule->power_rule.max_eirp = (sdev->regdb.country[country_index].collection->reg_rule[i]->max_eirp * 100);
 
 		/* Flags 1 byte */
 		reg_rule->flags = slsi_remap_reg_rule_flags(sdev->regdb.country[country_index].collection->reg_rule[i]->flags);
 	}
 
-	domain_info->regdomain->n_reg_rules = num_rules;
+	domain_info->regdomain->n_reg_rules = sdev->regdb.country[country_index].collection->reg_rule_num;
 
 	return country_index;
 }

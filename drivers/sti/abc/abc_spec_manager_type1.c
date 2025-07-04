@@ -221,9 +221,8 @@ void sec_abc_enqueue_event_data_type1(struct abc_common_spec_data *common_spec, 
 void sec_abc_dequeue_event_data_type1(struct abc_common_spec_data *common_spec)
 {
 	struct spec_data_type1 *spec_type1 = container_of(common_spec, struct spec_data_type1, common_spec);
-	struct abc_fault_info out;
 
-	out = sec_abc_dequeue_type1(&spec_type1->buffer);
+	sec_abc_dequeue_type1(&spec_type1->buffer);
 	spec_type1->buffer.warn_cnt--;
 }
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2018 Samsung Electronics Co., Ltd. All Rights Reserved
  *
@@ -21,7 +22,7 @@
 
 #ifdef CONFIG_SECURITY_DSMS
 
-extern int noinline dsms_send_message(const char *feature_code,
+extern noinline int dsms_send_message(const char *feature_code,
 				      const char *detail, int64_t value);
 
 #else
@@ -30,9 +31,9 @@ static inline int dsms_send_message(const char *feature_code,
 				    const char *detail,
 				    int64_t value)
 {
-	/* When SEC_PRODUCT_FEATURE_SECURITY_SUPPORT_DSMS=FALSE 
-	 * CONFIG_SECURITY_DSMS is disabled and 
-	 * DSMS functionality is not implemented. 
+	/* When SEC_PRODUCT_FEATURE_SECURITY_SUPPORT_DSMS=FALSE
+	 * CONFIG_SECURITY_DSMS is disabled and
+	 * DSMS functionality is not implemented.
 	 */
 	return DSMS_NOT_IMPLEMENTED;
 }

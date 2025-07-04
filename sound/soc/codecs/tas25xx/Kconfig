@@ -20,17 +20,6 @@ config PLATFORM_EXYNOS
       which acts as abstraction layer to the algorithm
       for Exynos platform.
 
-config PLATFORM_MTK
-    bool "MTK platform support"
-    depends on SND_SOC_TAS25XX
-    default n
-    help
-      Enable support for MTK platform.
-
-      This enables the platform specific interface
-      which acts as abstraction layer to the algorithm
-      for MTK platform.
-
 config TAS25XX_ALGO
     bool "TAS25XX AP DSP Communication Support"
     depends on SND_SOC_TAS25XX
@@ -40,17 +29,6 @@ config TAS25XX_ALGO
       This includes TAS25XX Calibration driver interfaces
       and functions also interfacing driver to corresponding
       Platform/DSP
-
-config PLATFORM_QCOM
-    bool "QCOM platform support"
-    depends on TAS25XX_ALGO
-    default n
-    help
-      Enable support for Qcom platform.
-
-      This enables the platform specific interface
-      which acts as abstraction layer to the algorithm
-      for Exynos platform.
 
 config TISA_KBIN_INTF
     bool "Kbin file method support"
@@ -103,5 +81,12 @@ config TAS25XX_MISC
       Enable the misc driver "TAS25XX" which is
       interface to communicate to device via register
       read and write
+
+config TAS25XX_KCTRL_RELOAD
+    bool "For reloading kcontrol"
+    depends on SND_SOC_TAS25XX
+    default n
+    help
+      Enable support for reloading kcontrol.
 
 endif # SND_SOC_TAS25XX

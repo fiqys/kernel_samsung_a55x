@@ -22,6 +22,7 @@ struct light_ab_event {
 	s32 lux;
 	u8 min_flag;
 	u32 brightness;
+	u8 flip_state;
 } __attribute__((__packed__));
 
 struct light_autobrightness_data {

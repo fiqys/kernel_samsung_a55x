@@ -25,24 +25,12 @@
 #include <linux/device.h>
 #include "../inc/tas25xx-calib.h"
 #include "../inc/tas_smart_amp_v2.h"
-#include "tas25xx-algo-bin-utils.h"
 #include "tas25xx-algo-intf.h"
 #include "../../inc/tas25xx.h"
 
 #define TDM_MAX_CHANNELS 4
 
-#if IS_ENABLED(CONFIG_PLATFORM_QCOM)
-#include  <dsp/tas_qualcomm.h>
-void tas25xx_parse_algo_bin_qdsp_intf(int ch_count, u8 *buf);
-#endif /*CONFIG_PLATFORM_XXX*/
-
-#if IS_ENABLED(CONFIG_TAS25XX_CALIB_VAL_BIG)
 #include "tas25xx-calib-validation.h"
-#endif
-
-#if IS_ENABLED(CONFIG_TISA_SYSFS_INTF)
-#include "tas25xx-sysfs-debugfs-utils.h"
-#endif
 
 static struct device *s_device;
 static char s_channel_map[TDM_MAX_CHANNELS] = {0, 1, 2, 3};
@@ -216,7 +204,7 @@ static int tas25xx_get_digital_gain_left(struct snd_kcontrol *pKcontrol,
 	int ret = tas25xx_get_digital_gain_common(CHANNEL0);
 
 	pUcontrol->value.integer.value[0] = ret;
-	pr_info("TI-SmartPA: %s: got digital gain for left ch %d\n",
+	pr_info("TI-SmartPA: %s: get digital gain for left ch %d\n",
 		__func__, ret);
 
 	return 0;
@@ -228,7 +216,7 @@ static int tas25xx_get_digital_gain_right(struct snd_kcontrol *pKcontrol,
 	int ret = tas25xx_get_digital_gain_common(CHANNEL1);
 
 	pUcontrol->value.integer.value[0] = ret;
-	pr_info("TI-SmartPA: %s: Getting digital gain right ch %d\n",
+	pr_info("TI-SmartPA: %s: get digital gain right ch %d\n",
 		__func__, ret);
 
 	return 0;
@@ -300,12 +288,10 @@ int tas25xx_start_algo_processing(int iv_width, int vbat_on)
 {
 	if (!tas25xx_check_if_algo_ctrl_bypassed(0)) {
 		tas25xx_algo_enable_common_controls(1);
-#if IS_ENABLED(CONFIG_TAS25XX_CALIB_VAL_BIG) || IS_ENABLED(CONFIG_TISA_SYSFS_INTF)
 		tas_set_algo_run_status(1);
 		tas25xx_send_channel_mapping();
 		tas25xx_send_drv_op_mode();
 		tas25xx_send_algo_calibration();
-#endif /* CONFIG_TAS25XX_CALIB_VAL_BIG || CONFIG_TISA_SYSFS_INTF */
 		if (!tas25xx_set_iv_bit_fomat(iv_width, vbat_on, 1))
 			pr_info("TI-SmartPA: Error sending IV/Vbat infor to algo");
 	} else {
@@ -318,16 +304,11 @@ int tas25xx_start_algo_processing(int iv_width, int vbat_on)
 int tas25xx_stop_algo_processing(void)
 {
 	if (!tas25xx_check_if_algo_ctrl_bypassed(0)) {
-#if IS_ENABLED(CONFIG_TAS25XX_CALIB_VAL_BIG)
+		tas_get_algo_param_version_info();
 		tas25xx_update_big_data();
 		tas_set_algo_run_status(0);
-#endif /* CONFIG_TAS25XX_CALIB_VAL_BIG */
 		tas25xx_algo_enable_common_controls(0);
 	}
-
-#if IS_ENABLED(CONFIG_TISA_KBIN_INTF)
-		tas25xx_algo_set_inactive();
-#endif /* CONFIG_TISA_KBIN_INTF */
 
 	return 0;
 }
@@ -335,15 +316,9 @@ int tas25xx_stop_algo_processing(void)
 void tas25xx_parse_algo_bin(int ch_count, u8 *buf)
 {
 	uint32_t *ptr = (uint32_t *)buf;
-#if IS_ENABLED(CONFIG_PLATFORM_QCOM)
-	tas25xx_parse_algo_bin_qdsp_intf(ch_count, buf);
-#endif
 	/* skip 10 * 4bytes */
 	ptr += 10;
 	buf = (u8 *)ptr;
-#if IS_ENABLED(CONFIG_TISA_SYSFS_INTF)
-	tas25xx_parse_algo_bin_sysfs(ch_count, buf);
-#endif
 }
 
 void tas_smartamp_add_algo_controls(struct snd_soc_component *codec,
@@ -353,32 +328,11 @@ void tas_smartamp_add_algo_controls(struct snd_soc_component *codec,
 
 	tas25xx_smartamp_alg_intf_init();
 
-#if IS_ENABLED(CONFIG_TISA_SYSFS_INTF)
-	pr_info("TI-SmartPA: %s: Adding debugfs controls\n", __func__);
-	tas_smartamp_add_algo_controls_debugfs(codec, number_of_channels);
-#endif
-
-#if IS_ENABLED(CONFIG_TAS25XX_CALIB_VAL_BIG)
 	tas25xx_algo_add_calib_valid_bigdata(number_of_channels);
-#endif
 
 	/* Some common interfaces used*/
 	snd_soc_add_component_controls(codec, tas25xx_algo_common_controls,
 		ARRAY_SIZE(tas25xx_algo_common_controls));
-
-#if IS_ENABLED(CONFIG_TISA_BIN_INTF)
-	pr_info("TI-SmartPA: %s: Adding bin intf controls\n", __func__);
-	tas_smartamp_add_codec_mixer_controls(codec);
-#endif
-
-#if IS_ENABLED(CONFIG_TISA_KBIN_INTF)
-	tas_smartamp_add_codec_mixer_controls(codec);
-	tas25xx_algo_set_device(dev);
-	bin_file_set_device(dev);
-	bin_file_parse_init();
-
-	pr_info("TI-SmartPA: %s: Initialising kbin file done\n", __func__);
-#endif
 
 	tas_calib_init();
 
@@ -391,20 +345,7 @@ void tas_smartamp_remove_algo_controls(struct snd_soc_component *codec)
 	if (!s_algo_intf_initialised)
 		return;
 
-#if IS_ENABLED(CONFIG_TISA_SYSFS_INTF)
-	tas_smartamp_remove_algo_controls_debugfs(codec);
-#endif
-
-#if IS_ENABLED(CONFIG_TAS25XX_CALIB_VAL_BIG)
 	tas25xx_algo_remove_calib_valid_bigdata();
-#endif
-
-#if IS_ENABLED(CONFIG_TISA_KBIN_INTF)
-	tas_smartamp_kbin_deinitalize();
-	tas25xx_algo_set_device(NULL);
-	bin_file_set_device(NULL);
-	bin_file_parse_deinit();
-#endif
 
 	tas25xx_smartamp_alg_intf_deinit();
 	tas_calib_exit();

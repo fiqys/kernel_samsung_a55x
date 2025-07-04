@@ -3751,9 +3751,8 @@ void slsi_nan_ndp_termination_handler(struct slsi_dev *sdev, struct net_device *
 			ndev_data_vif->nan.ndp_count--;
 		SLSI_MUTEX_UNLOCK(ndev_data_vif->vif_mutex);
 	}
-	if (ndev_vif->nan.ndp_active_id_map & BIT(ndp_instance_id))
-		slsi_nan_del_peer(sdev, dev, ndi, ndp_instance_id);
 	ndev_vif->nan.ndp_active_id_map &= ~BIT(ndp_instance_id);
+	slsi_nan_del_peer(sdev, dev, ndi, ndp_instance_id);
 	slsi_nan_ndp_del_entry(sdev, dev, ndp_instance_id, false);
 
 	if (data_dev) {

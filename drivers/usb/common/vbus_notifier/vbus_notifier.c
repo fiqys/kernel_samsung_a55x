@@ -89,10 +89,11 @@ void vbus_notifier_handle(vbus_status_t new_dev)
 {
 	pr_info("%s: (%d)->(%d)\n", __func__, vbus_notifier.vbus_type, new_dev);
 
-	if (vbus_notifier.vbus_type == new_dev)
-		return;
-
 	mutex_lock(&vbus_mutex);
+	if (vbus_notifier.vbus_type == new_dev) {
+		mutex_unlock(&vbus_mutex);
+		return;
+	}
 	if (new_dev == STATUS_VBUS_HIGH)
 		vbus_notifier.cmd = VBUS_NOTIFY_CMD_RISING;
 	else if (new_dev == STATUS_VBUS_LOW)

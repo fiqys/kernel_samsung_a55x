@@ -47,12 +47,17 @@
 #include <linux/sched.h>
 #include <linux/i2c.h>
 #include <linux/ktime.h>
+#include <linux/pinctrl/consumer.h>
 
 #include "nfc_wakelock.h"
 #include "sec_nfc.h"
 
 #ifdef CONFIG_SEC_NFC_LOGGER
 #include "../nfc_logger/nfc_logger.h"
+#endif
+
+#if IS_ENABLED(CONFIG_SEC_NFC_EINT_EXYNOS)
+extern void esca_init_eint_nfc_clk_req(u32 eint_num);
 #endif
 
 #define SEC_NFC_GET_INFO(dev) i2c_get_clientdata(to_i2c_client(dev))
@@ -76,6 +81,11 @@ struct sec_nfc_i2c_info {
 	u8 *buf;
 };
 
+enum sec_nfc_pm_status {
+	SEC_NFC_PM_RESUME = 0,
+	SEC_NFC_PM_SUSPEND,
+};
+
 struct sec_nfc_info {
 	struct miscdevice miscdev;
 	struct mutex mutex;
@@ -85,9 +95,13 @@ struct sec_nfc_info {
 	struct sec_nfc_i2c_info i2c_info;
 	struct nfc_wake_lock nfc_wake_lock;
 	struct nfc_wake_lock nfc_clk_wake_lock;
+	int sec_nfc_pm_status;
 	bool clk_ctl;
 	bool clk_state;
 	struct platform_device *pdev;
+#ifdef CONFIG_SEC_NFC_WAIT_FOR_DISABLE_COMBO_RESET_IRQ
+	struct completion disable_combo_reset_comp;
+#endif
 };
 
 #ifdef CONFIG_ESE_COLDRESET
@@ -132,6 +146,9 @@ static irqreturn_t sec_nfc_irq_thread_fn(int irq, void *dev_id)
 	/* Skip interrupt during power switching
 	 * It is released after first write
 	 */
+#ifdef CONFIG_SEC_NFC_WAIT_FOR_DISABLE_COMBO_RESET_IRQ
+	complete_all(&info->disable_combo_reset_comp);
+#endif
 	if (info->i2c_info.read_irq == SEC_NFC_SKIP) {
 		NFC_LOG_REC("Now power swiching. Skip this IRQ\n");
 		mutex_unlock(&info->i2c_info.read_mutex);
@@ -427,6 +444,9 @@ done:
 	return rc;
 }
 
+#ifdef CONFIG_ESE_P3_LSI
+extern void p3_power_control(bool onoff);
+#endif
 static void sec_nfc_power_on(struct sec_nfc_info *nfc_info)
 {
 	static bool power_is_on;
@@ -461,6 +481,10 @@ static void sec_nfc_power_on(struct sec_nfc_info *nfc_info)
 		}
 	}
 
+#ifdef CONFIG_ESE_P3_LSI
+	p3_power_control(true);
+#endif
+
 	/* turning on the PVDD takes time on a particular HW */
 	usleep_range(1000, 1100);
 
@@ -494,6 +518,9 @@ int sec_nfc_i2c_probe(struct i2c_client *client)
 		NFC_LOG_ERR("probe() failed to allocate memory\n");
 		return -ENOMEM;
 	}
+#ifdef CONFIG_SEC_NFC_WAIT_FOR_DISABLE_COMBO_RESET_IRQ
+	init_completion(&info->disable_combo_reset_comp);
+#endif
 	info->i2c_info.i2c_dev = client;
 	info->i2c_info.read_irq = SEC_NFC_NONE;
 	mutex_init(&info->i2c_info.read_mutex);
@@ -516,7 +543,6 @@ int sec_nfc_i2c_probe(struct i2c_client *client)
 			info);
 	if (ret < 0) {
 		NFC_LOG_ERR("probe() failed to register IRQ handler\n");
-		devm_kfree(dev, info->i2c_info.buf);
 		return ret;
 	}
 
@@ -544,6 +570,9 @@ static irqreturn_t sec_nfc_clk_irq_thread(int irq, void *dev_id)
 	struct sec_nfc_platform_data *pdata = info->pdata;
 	bool value;
 
+	if (pdata->eint_mode)
+		return IRQ_HANDLED;
+
 	if (pdata->irq_all_trigger) {
 		value = gpio_get_value(pdata->clk_req) > 0 ? true : false;
 		NFC_LOG_REC("clk%d\n", value);
@@ -552,8 +581,9 @@ static irqreturn_t sec_nfc_clk_irq_thread(int irq, void *dev_id)
 			return IRQ_HANDLED;
 
 		if (value) {
-			if (!wake_lock_active(&info->nfc_clk_wake_lock))
-				wake_lock(&info->nfc_clk_wake_lock);
+			if (info->sec_nfc_pm_status == SEC_NFC_PM_SUSPEND &&
+					!wake_lock_active(&info->nfc_clk_wake_lock))
+				wake_lock_timeout(&info->nfc_clk_wake_lock, 2*HZ);
 			if (pdata->clk && clk_prepare_enable(pdata->clk)) {
 				NFC_LOG_ERR("clock enable failed\n");
 				return IRQ_HANDLED;
@@ -567,8 +597,12 @@ static irqreturn_t sec_nfc_clk_irq_thread(int irq, void *dev_id)
 
 		info->clk_state = value;
 	} else {
-		wake_lock_timeout(&info->nfc_wake_lock, 2*HZ);
-		NFC_LOG_REC("clk\n");
+		if (info->sec_nfc_pm_status == SEC_NFC_PM_SUSPEND) {
+			wake_lock_timeout(&info->nfc_clk_wake_lock, 2*HZ);
+			NFC_LOG_REC("clkw\n");
+		} else {
+			NFC_LOG_REC("clk\n");
+		}
 	}
 
 	return IRQ_HANDLED;
@@ -680,9 +714,18 @@ static int sec_nfc_set_mode(struct sec_nfc_info *info,
 		}
 
 		if (gpio_get_value(pdata->ven) == SEC_NFC_PW_ON) {
+#ifdef CONFIG_SEC_NFC_WAIT_FOR_DISABLE_COMBO_RESET_IRQ
+			reinit_completion(&info->disable_combo_reset_comp);
+#endif
 			ret = i2c_master_send(info->i2c_info.i2c_dev, disable_combo_reset_cmd,
 					sizeof(disable_combo_reset_cmd)/sizeof(u8));
 			NFC_LOG_INFO("disable combo_reset_command ret: %d\n", ret);
+#ifdef CONFIG_SEC_NFC_WAIT_FOR_DISABLE_COMBO_RESET_IRQ
+			if (mode == SEC_NFC_MODE_BOOTLOADER) {
+				wait_for_completion_timeout(&info->disable_combo_reset_comp,
+								msecs_to_jiffies(1500));
+			}
+#endif
 		} else
 			NFC_LOG_INFO("skip disable combo_reset_command\n");
 
@@ -1049,6 +1092,7 @@ static int sec_nfc_suspend(struct device *dev)
 	if (info->mode == SEC_NFC_MODE_BOOTLOADER)
 		ret = -EPERM;
 
+	info->sec_nfc_pm_status = SEC_NFC_PM_SUSPEND;
 	mutex_unlock(&info->mutex);
 
 	return ret;
@@ -1056,7 +1100,10 @@ static int sec_nfc_suspend(struct device *dev)
 
 static int sec_nfc_resume(struct device *dev)
 {
+	struct sec_nfc_info *info = SEC_NFC_GET_INFO(dev);
+
 	NFC_LOG_INFO_WITH_DATE("resume!\n");
+	info->sec_nfc_pm_status = SEC_NFC_PM_RESUME;
 
 	return 0;
 }
@@ -1120,6 +1167,11 @@ static int sec_nfc_parse_dt(struct device *dev,
 	if (of_property_read_bool(np, "sec-nfc,irq_all_trigger")) {
 		pdata->irq_all_trigger = true;
 		NFC_LOG_INFO("irq_all_trigger\n");
+	}
+	/*slsi ap EINT mapping*/
+	if (of_property_read_bool(np, "sec-nfc,eint_mode")) {
+		pdata->eint_mode = true;
+		NFC_LOG_INFO("eint_mode\n");
 	}
 
 	if (!of_property_read_string(np, "sec-nfc,nfc_ic_type", &pdata->nfc_ic_type))
@@ -1300,10 +1352,15 @@ exit:
 
 	return size;
 }
-
+#if (KERNEL_VERSION(6, 3, 0) <= LINUX_VERSION_CODE)
+static ssize_t test_show(const struct class *class,
+				const struct class_attribute *attr,
+					char *buf)
+#else
 static ssize_t test_show(struct class *class,
 					struct class_attribute *attr,
 					char *buf)
+#endif
 {
 	return sec_nfc_test_run(buf);
 }
@@ -1311,8 +1368,13 @@ static ssize_t test_show(struct class *class,
 static CLASS_ATTR_RO(test);
 #endif
 
+#if (KERNEL_VERSION(6, 3, 0) <= LINUX_VERSION_CODE)
+static ssize_t pvdd_store(const struct class *class,
+	const struct class_attribute *attr, const char *buf, size_t size)
+#else
 static ssize_t pvdd_store(struct class *class,
 	struct class_attribute *attr, const char *buf, size_t size)
+#endif
 {
 	if (!g_nfc_info) {
 		NFC_LOG_ERR("%s nfc drv is NULL!", __func__);
@@ -1328,8 +1390,13 @@ static ssize_t pvdd_store(struct class *class,
 }
 static CLASS_ATTR_WO(pvdd);
 
+#if (KERNEL_VERSION(6, 3, 0) <= LINUX_VERSION_CODE)
+static ssize_t nfc_support_show(const struct class *class,
+		const struct class_attribute *attr, char *buf)
+#else
 static ssize_t nfc_support_show(struct class *class,
 		struct class_attribute *attr, char *buf)
+#endif
 {
 	NFC_LOG_INFO("\n");
 	return 0;
@@ -1341,7 +1408,11 @@ int sec_nfc_create_sysfs_node(void)
 	struct class *nfc_class;
 	int ret = 0;
 
+#if (KERNEL_VERSION(6, 3, 0) <= LINUX_VERSION_CODE)
+	nfc_class = class_create("nfc_sec");
+#else
 	nfc_class = class_create(THIS_MODULE, "nfc_sec");
+#endif
 	if (IS_ERR(&nfc_class))
 		NFC_LOG_ERR("NFC: failed to create nfc class\n");
 	else {
@@ -1465,11 +1536,16 @@ static int __sec_nfc_probe(struct device *dev)
 
 		gpio_direction_input(pdata->clk_req);
 		pdata->clk_irq = gpio_to_irq(pdata->clk_req);
-
+#if IS_ENABLED(CONFIG_SEC_NFC_EINT_EXYNOS)
+		if (pdata->eint_mode)
+			esca_init_eint_nfc_clk_req(pdata->clk_req);
+#endif
 		ret = request_threaded_irq(pdata->clk_irq, NULL, sec_nfc_clk_irq_thread,
 				irq_flag, "sec-nfc_clk", info);
 		if (ret < 0)
 			NFC_LOG_ERR("failed to register CLK REQ IRQ handler\n");
+		else if (pdata->eint_mode)
+			NFC_LOG_INFO("skip enable irq wake in eint mode\n");
 		else
 			enable_irq_wake(pdata->clk_irq);
 	}
@@ -1522,9 +1598,7 @@ err_gpio_ven:
 	misc_deregister(&info->miscdev);
 err_dev_reg:
 	mutex_destroy(&info->mutex);
-	devm_kfree(dev, info);
 err_info_alloc:
-	devm_kfree(dev, pdata);
 
 	return ret;
 }
@@ -1555,8 +1629,12 @@ static int __sec_nfc_remove(struct device *dev)
 #define SEC_NFC_INIT(driver)	i2c_add_driver(driver)
 #define SEC_NFC_EXIT(driver)	i2c_del_driver(driver)
 
+#if (KERNEL_VERSION(6, 3, 0) <= LINUX_VERSION_CODE)
+static int sec_nfc_probe(struct i2c_client *client)
+#else
 static int sec_nfc_probe(struct i2c_client *client,
 		const struct i2c_device_id *id)
+#endif
 {
 	int ret = 0;
 

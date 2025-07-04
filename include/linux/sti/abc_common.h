@@ -79,7 +79,7 @@ extern struct class *sec_class;
 #define ABC_EVENT_BUFFER_MAX		30
 #define ABC_DEFAULT_COUNT			0
 #define ABC_TEST_STR_MAX		128
-#define ABC_SKIP_EVENT_COUNT_THRESHOLD		3
+#define ABC_SKIP_EVENT_COUNT_THRESHOLD		100
 
 enum abc_enable_cmd {
 	ERROR_REPORT_MODE_ENABLE = 0,
@@ -218,7 +218,11 @@ int sec_abc_save_pre_events(struct abc_key_data *key_data, char *uevent_type);
 extern struct registered_abc_event_struct abc_event_list[];
 extern int REGISTERED_ABC_EVENT_TOTAL;
 
+#if IS_ENABLED(CONFIG_UML)
+#define ABC_PRINT(format, ...) pr_debug("[sec_abc] %s : " format, __func__, ##__VA_ARGS__)
+#else
 #define ABC_PRINT(format, ...) pr_info("[sec_abc] %s : " format, __func__, ##__VA_ARGS__)
+#endif
 #define ABC_DEBUG(format, ...) pr_debug("[sec_abc] %s : " format, __func__, ##__VA_ARGS__)
 
 #ifdef CONFIG_SEC_KUNIT

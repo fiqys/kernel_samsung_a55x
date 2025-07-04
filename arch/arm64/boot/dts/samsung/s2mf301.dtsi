@@ -19,6 +19,14 @@
 #endif
 
 #if 0
+&${usbpd_vctrl_otg_parent} {
+	usbpd_vctrl_otg: usbpd_vctrl_otg {
+		GPIO_CONFIG_PUD_DRV(${usbpd_vctrl_otg_gpio}, FUNC_OUTPUT_LOW, PULL_DOWN, DRV_LV1);
+	};
+};
+#endif
+
+#if 0
 &${pogo_dock_parent} {
 	pogo_dock_int: pogo_dock_int {
 		GPIO_CONFIG_PUD_DRV(${pogo_gpio}, FUNC_INPUT_WAKEUP, PULL_NONE, DRV_LV1);
@@ -53,6 +61,9 @@
 						&usbpd_vbus_discharging
 #endif
 #if 0
+						&usbpd_vctrl_otg
+#endif
+#if 0
 						&pogo_dock_int
 #endif
 						>;
@@ -61,9 +72,17 @@
 		usbpd,vbus_discharging = <SEC_GPIO_REF(${usbpd_vbus_discharging_gpio}) 0>;
 #endif
 #if 0
-		pogo_dock_int = <SEC_GPIO_REF(${pogo_gpio}) 0>;
+		usbpd,vctrl_otg = <SEC_GPIO_REF(${usbpd_vctrl_otg_gpio}) 0>;
 #endif
-
+#if 0
+		pogo_dock_int = <SEC_GPIO_REF(${pogo_gpio}) 0>;
+#if 0
+		pogo_dock_int_active_high;
+#endif
+#endif
+#if 0
+		vconn-en;
+#endif
 		pdic-manager {
 			/* sink */
 			pdic,max_power = <5000>;

@@ -25,9 +25,9 @@
 #include <sound/soc.h>
 #include <linux/version.h>
 
-#define TAS25XX_DRIVER_TAG  "UDA_0.0.19_4_K6.1_RM_MUTE_WRITES"
+#define TAS25XX_DRIVER_TAG  "UDA_0.0.23_7_K6.1-SLSI"
 
-#define MAX_CHANNELS	2
+#define MAX_CHANNELS	4
 
 /* Page Control Register */
 #define TAS25XX_PAGECTL_REG  0
@@ -52,59 +52,19 @@
 /* Rev Info */
 #define TAS25XX_REVID_REG TAS25XX_REG(0x0, 0x0, 0x78)
 
-/* data format */
-#define TAS25XX_DATAFORMAT_SHIFT  2
-#define TAS25XX_DATAFORMAT_I2S  0x0
-#define TAS25XX_DATAFORMAT_DSP  0x1
-#define TAS25XX_DATAFORMAT_RIGHT_J  0x2
-#define TAS25XX_DATAFORMAT_LEFT_J  0x3
-
-#define TAS25XX_DAI_FMT_MASK  (0x7 << TAS25XX_DATAFORMAT_SHIFT)
-
-
-#define ERROR_NONE  0x0000000
-#define ERROR_PLL_ABSENT  0x0000001
-#define ERROR_DEVA_I2C_COMM  0x0000002
-#define ERROR_DEVB_I2C_COMM  0x0000004
-#define ERROR_CLOCK  0x0000008
-#define ERROR_YRAM_CRCCHK  0x0000010
-#define ERROR_OVER_CURRENT  0x0000020
-#define ERROR_DIE_OVERTEMP  0x0000040
-#define ERROR_OVER_VOLTAGE  0x0000080
-#define ERROR_UNDER_VOLTAGE  0x0000100
-#define ERROR_BROWNOUT  0x0000200
-#define ERROR_CLASSD_PWR  0x0000400
-#define ERROR_FAILSAFE  0x0000800
+#define TAS25XX_PWR_CTL_REG TAS25XX_REG(0x0, 0x0, 0x2)
 
 #define TAS25XX_IRQ_DET_TIMEOUT		30000
 #define TAS25XX_IRQ_DET_CNT_LIMIT	500
 
-/* 5 second */
-#define CHECK_PERIOD  5000
-
 #define TAS25XX_I2C_RETRY_COUNT  3
-#define ERROR_I2C_SUSPEND  -1
-#define ERROR_I2C_FAILED  -2
 
 #define TAS25XX_SWITCH  0x10000001
-#define TAS25XX_RIGHT_SWITCH  0x10000002
-#define RX_SCFG_LEFT  0x10000003
-#define RX_SCFG_RIGHT  0x10000004
 
-#define RESTART_MAX  3
 #define MAX_CMD_LIST 5 /* sysfs cmd nodes */
 
 struct tas25xx_priv;
 struct snd_soc_component;
-
-/* REGBIN related */
-#define TAS25XX_CONFIG_SIZE  (10)
-#define TAS25XX_DEVICE_SUM  (8)
-
-#define TAS25XX_CMD_SING_W  (0x1)
-#define TAS25XX_CMD_BURST  (0x2)
-#define TAS25XX_CMD_DELAY  (0x3)
-#define TAS25XX_CMD_FIELD_W  (0x4)
 
 #define SMS_HTONS(a, b)  ((((a)&0x00FF)<<8) | \
 				((b)&0x00FF))
@@ -113,6 +73,21 @@ struct snd_soc_component;
 					(((c)&0x000000FF)<<8) | \
 					((d)&0x000000FF))
 
+#define is_error_on_ch(errmask, ch) (errmask & (1 << (ch)))
+#define is_ch_in_mask(mask, ch) (mask & (1<<ch))
+#define is_err_on_all_ch(mask, ch) (mask == ((1 << ch) - 1))
+#define set_ch_ignore(mask, ch) \
+	do { \
+		mask |= (1 << (ch)); \
+		pr_err("tas25xx: ch=%d is set to ignored because of err\n", ch); \
+	} while (0)
+#define set_ch_ignore_on_i2c_err(ret, mask, ch) \
+	do { \
+		if ((ret) == -EIO) { \
+			mask |= (1 << (ch)); \
+			pr_err("tas25xx: ch=%d is set to ignored because of err\n", ch); \
+		} \
+	} while (0)
 
 #define CMD_SINGLE_WRITE	0
 #define CMD_BURST_WRITES	1
@@ -219,7 +194,6 @@ struct tas_device_ops {
 /*TODO:*/
 };
 
-
 struct tas_device {
 	int mn_chip_id;
 	int mn_current_book;
@@ -278,6 +252,7 @@ struct tas25xx_intr_info {
 	int32_t action;
 	int32_t detected;
 	int32_t is_clock_based;
+	int32_t notify_int_val;
 	uint32_t count;
 	uint64_t count_persist;
 	struct device_attribute *dev_attr;
@@ -303,6 +278,7 @@ struct tas_block_op_data_t {
 	uint32_t no_of_tx_blks;
 	uint8_t *sw_reset;
 	uint8_t *power_check;
+	uint8_t *def_reg_check;
 	uint8_t *mute;
 	uint8_t *cal_init;
 	uint8_t *cal_deinit;
@@ -310,13 +286,24 @@ struct tas_block_op_data_t {
 	uint8_t *tx_fmt_data;
 };
 
-#if IS_ENABLED(CONFIG_TAS25XX_IRQ_BD)
+struct tas25xx_reg_data_t {
+	char cmd;
+	int32_t reg;
+	int32_t count;
+	uint8_t value[4];
+	uint8_t mask;
+};
+
 struct irq_bigdata {
 	struct device_attribute *p_dev_attr;
 	struct attribute **p_attr_arr;
 	struct device *irq_dev;
 };
-#endif
+
+struct i2c_err_data {
+	uint32_t err_count;
+	uint32_t err_count_total;
+};
 
 struct cmd_data {
 	struct device_attribute *p_dev_attr;
@@ -328,9 +315,6 @@ struct tas25xx_priv {
 	struct linux_platform *platform_data;
 	struct kobject *k_obj;
 	int m_power_state;
-	int mn_frame_size;
-	int mn_ppg;
-	int mn_ch_size;
 	int mn_rx_width;
 	int mn_tx_slot_width;
 	int sample_rate;
@@ -339,15 +323,14 @@ struct tas25xx_priv {
 	int mn_vbat;
 	int curr_mn_vbat;
 	int ch_count;
+	int tx_ch_count;
 	int mn_slots;
-	int mn_rx_slot_map[2];
+	int slot_width;
 	unsigned int mn_fmt;
-	int mn_fmt_mode;
-	int mn_frame_start;
-	int mn_rx_edge;
-	int mn_rx_offset;
-	int mn_tx_edge;
-	int mn_tx_offset;
+	int curr_rx_bitwidth[MAX_CHANNELS];
+	int curr_tx_bitwidth[MAX_CHANNELS];
+	int *ti_amp_state;
+	uint32_t amp_i2c_err;
 	int dac_power;	/* this is set based on the DAC events */
 	struct tas_device **devs;
 	int (*read)(struct tas25xx_priv *p_tas25xx, int32_t chn,
@@ -390,6 +373,8 @@ struct tas25xx_priv {
 	uint32_t dev_revid;
 	uint32_t fw_size;
 	uint8_t *fw_data;
+	int is_reload;
+	struct delayed_work bin_reload_work;
 	struct delayed_work post_fw_load_work;
 	struct delayed_work fw_load_work;
 	wait_queue_head_t fw_wait;
@@ -400,13 +385,14 @@ struct tas25xx_priv {
 	atomic_t dev_init_status;
 	int device_used;
 	int irq_enabled[MAX_CHANNELS];
-	struct tas25xx_interrupts intr_data[MAX_CHANNELS];
-#if IS_ENABLED(CONFIG_TAS25XX_IRQ_BD)
 	struct irq_bigdata irqdata;
-#endif
+	int nested_irq;
 	struct class *class;
 	struct cmd_data cmd_data;
+	struct tas25xx_interrupts intr_data[MAX_CHANNELS];
 	struct tas_block_op_data_t block_op_data[MAX_CHANNELS];
+	int power_ctl_suspended;
+	struct tas25xx_reg_data_t power_ctl_data[MAX_CHANNELS];
 };
 
 static inline int is_power_up_state(enum tas_power_states_t state)

@@ -129,6 +129,12 @@ typedef struct fg_age_data_info {
 	int rRS_CC0;
 } fg_age_data_info_t;
 
+typedef struct fg_zadj_data {
+	int zadj_chg;
+	int zadj_chg2;
+	int zadj;
+} fg_zadj_data_t;
+
 struct s2mf301_fuelgauge_platform_data {
 	int fuel_alert_soc;
 	int fuel_alert_vol;
@@ -148,6 +154,7 @@ struct s2mf301_fuelgauge_platform_data {
 	unsigned int float_voltage;
 
 	int bat_id_gpio[BAT_GPIO_NO];
+	unsigned int *bat_id_cutoff_level;
 	int bat_gpio_cnt;
 };
 
@@ -175,6 +182,7 @@ struct s2mf301_fuelgauge_data {
 	struct fg_info info;
 
 	fg_age_data_info_t *age_data_info;
+	fg_zadj_data_t *zadj_data;
 	int fg_num_age_step;
 	int fg_age_step;
 	int age_reset_status;

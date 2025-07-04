@@ -22,6 +22,7 @@
 #include <linux/fs.h>
 #include <linux/err.h>
 #include <linux/switch.h>
+#include <linux/version.h>
 
 struct class *switch_class;
 static atomic_t device_count;
@@ -103,7 +104,12 @@ EXPORT_SYMBOL_GPL(switch_set_state);
 static int create_switch_class(void)
 {
 	if (!switch_class) {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0)
 		switch_class = class_create(THIS_MODULE, "switch");
+#else
+		switch_class = class_create("switch");
+#endif
+
 		if (IS_ERR(switch_class))
 			return PTR_ERR(switch_class);
 		atomic_set(&device_count, 0);

@@ -124,6 +124,7 @@ static void s2mf301_set_revision(void *_data, int val);
 static void s2mf301_ops_set_manual_retry(void *_data, int val);
 static void _s2mf301_self_soft_reset(struct s2mf301_usbpd_data *pdic_data);
 static int s2mf301_op_mode_set(void *_data);
+static void s2mf301_usbpd_check_hardreset(void *_data);
 static void s2mf301_usbpd_set_usbpd_reset(void *_data);
 static void s2mf301_usbpd_reset_osc_clk(struct s2mf301_usbpd_data *_data);
 
@@ -359,7 +360,7 @@ static void s2mf301_cc_hiccup_work(struct work_struct *work)
 		container_of(work, struct s2mf301_usbpd_data, cc_hiccup_work.work);
 	union power_supply_propval value;
 
-	if (is_lpcharge_pdic_param())
+	if(is_lpcharge_pdic_param())
 		return;
 
 	/* CC1/2, SBU1/2 OVP OFF */
@@ -367,7 +368,7 @@ static void s2mf301_cc_hiccup_work(struct work_struct *work)
 	value.intval = false;
 	pdic_data->psy_muic->desc->set_property(pdic_data->psy_muic,
 		(enum power_supply_property)POWER_SUPPLY_LSI_PROP_SBU_OVP_STATE, &value);
-
+	
 	pdic_data->is_manual_cc_open |= 1 << CC_OPEN_HICCUP;
 	s2mf301_usbpd_set_cc_state(pdic_data, CC_STATE_OPEN);
 }
@@ -380,7 +381,7 @@ void s2mf301_ops_cc_hiccup(void *_data, int en)
 
 	if (en) {
 		pr_info("%s, set delayed_work to cc_hiccup(%d sec)\n", __func__, pd_data->cc_hiccup_delay);
-
+		
 		schedule_delayed_work(&pdic_data->cc_hiccup_work,
 				msecs_to_jiffies(pd_data->cc_hiccup_delay * 1000));
 	} else {
@@ -516,7 +517,7 @@ void s2mf301_rprd_mode_change(void *data, u8 mode)
 		msleep(20);
 		s2mf301_usbpd_detach_init(usbpd_data);
 		s2mf301_usbpd_notify_detach(usbpd_data);
-		msleep(600);
+		msleep(150);
 		s2mf301_usbpd_set_rp_scr_sel(usbpd_data, PLUG_CTRL_RP80);
 		msleep(S2MF301_ROLE_SWAP_TIME_MS);
 		s2mf301_assert_drp(pd_data);
@@ -530,7 +531,7 @@ void s2mf301_rprd_mode_change(void *data, u8 mode)
 		msleep(20);
 		s2mf301_usbpd_detach_init(usbpd_data);
 		s2mf301_usbpd_notify_detach(usbpd_data);
-		msleep(600);
+		msleep(150);
 		s2mf301_assert_rd(pd_data);
 		s2mf301_usbpd_set_rp_scr_sel(usbpd_data, PLUG_CTRL_RP80);
 		msleep(S2MF301_ROLE_SWAP_TIME_MS);
@@ -615,6 +616,9 @@ static int s2mf301_usbpd_get_gpadc_volt(struct s2mf301_usbpd_data *pdic_data)
 	struct power_supply *psy_muic = pdic_data->psy_muic;
 	union power_supply_propval val;
 	int ret = 0;
+#if IS_ENABLED(CONFIG_S2M_PDIC_DP_SUPPORT)
+	struct usbpd_data *pd_data = dev_get_drvdata(pdic_data->dev);
+#endif
 
 	if (psy_pm) {
 		ret = psy_pm->desc->get_property(psy_pm,
@@ -633,6 +637,13 @@ static int s2mf301_usbpd_get_gpadc_volt(struct s2mf301_usbpd_data *pdic_data)
 	pdic_data->pm_vgpadc = val.intval;
 
 	s2mf301_info("%s, vGPADC = %dmV\n", __func__, pdic_data->pm_vgpadc);
+
+#if IS_ENABLED(CONFIG_S2M_PDIC_DP_SUPPORT)
+	if (pd_data->manager.dp_attached) {
+		s2mf301_info("%s, dp attached, skip SBUOVP check\n", __func__);
+		return 0;
+	}
+#endif
 
 	if (!psy_muic) {
 		psy_muic = pdic_data->psy_muic = get_power_supply_by_name("muic-manager");
@@ -1121,7 +1132,7 @@ static void s2mf301_assert_rd(void *_data)
 				S2MF301_REG_PLUG_CTRL_PD1_MANUAL_ON;
 		s2mf301_usbpd_write_reg(i2c, S2MF301_REG_PLUG_CTRL_PD12, val);
 
-		if (pdic_data->vconn_en) {
+		if (pdic_data->vconn_en && pdic_data->vconn_source == USBPD_VCONN_ON) {
 			s2mf301_usbpd_read_reg(i2c, S2MF301_REG_PLUG_CTRL_RpRd, &val);
 			val = (val & ~S2MF301_REG_PLUG_CTRL_PD_MANUAL_MASK) |
 					S2MF301_REG_PLUG_CTRL_RpRd_PD2_VCONN |
@@ -1136,7 +1147,7 @@ static void s2mf301_assert_rd(void *_data)
 				S2MF301_REG_PLUG_CTRL_PD2_MANUAL_ON;
 		s2mf301_usbpd_write_reg(i2c, S2MF301_REG_PLUG_CTRL_PD12, val);
 
-		if (pdic_data->vconn_en) {
+		if (pdic_data->vconn_en && pdic_data->vconn_source == USBPD_VCONN_ON) {
 			s2mf301_usbpd_read_reg(i2c, S2MF301_REG_PLUG_CTRL_RpRd, &val);
 			val = (val & ~S2MF301_REG_PLUG_CTRL_PD_MANUAL_MASK) |
 					S2MF301_REG_PLUG_CTRL_RpRd_PD1_VCONN |
@@ -1811,6 +1822,26 @@ static void s2mf301_usbpd_vbus_onoff(void *_data)
 	struct s2mf301_usbpd_data *pdic_data = pd_data->phy_driver_data;
 
 	s2mf301_usbpd_self_reset(pdic_data);
+
+#if IS_ENABLED(CONFIG_S2MF301_TYPEC_VBUS_DISCONNECT)
+	if(pdic_data->is_rid_attached) {
+		dev_info(pdic_data->dev, "%s, rid_attached\n", __func__);
+		return;
+	}
+
+	dev_info(pdic_data->dev, "%s, detach_valid(%d), pd_support(%d)\n",
+			__func__, pdic_data->detach_valid, pd_data->policy.pd_support);
+	if(!pdic_data->detach_valid && !pd_data->policy.pd_support && pdic_data->data_role == USBPD_UFP) {
+		s2mf301_usbpd_get_pmeter_volt(pdic_data);
+		if(pdic_data->pm_chgin >= 4000) {
+			pdic_event_work(pd_data, PDIC_NOTIFY_DEV_USB, PDIC_NOTIFY_ID_USB,
+					1/*attach*/, USB_STATUS_NOTIFY_ATTACH_UFP/*drp*/, 0);
+		} else {
+			pdic_event_work(pd_data, PDIC_NOTIFY_DEV_USB, PDIC_NOTIFY_ID_USB,
+					0/*attach*/, USB_STATUS_NOTIFY_DETACH/*drp*/, 0);
+		}
+	}
+#endif
 }
 
 static void s2mf301_usbpd_set_usbpd_reset(void *_data)
@@ -2018,27 +2049,46 @@ static int s2mf301_set_vconn_source(void *_data, int val)
 	if (val == USBPD_VCONN_ON) {
 		if (cc1_val == USBPD_Rd) {
 			if (cc2_val == USBPD_Ra) {
+				s2mf301_info("%s, cc2 vconn\n", __func__);
+
 				s2mf301_usbpd_read_reg(i2c, S2MF301_REG_PLUG_CTRL_RpRd, &reg_data);
 				reg_data &= ~S2MF301_REG_PLUG_CTRL_RpRd_VCONN_MASK;
 				reg_data |= (S2MF301_REG_PLUG_CTRL_RpRd_PD2_VCONN |
 						S2MF301_REG_PLUG_CTRL_VCONN_MANUAL_EN);
 				s2mf301_usbpd_write_reg(i2c, S2MF301_REG_PLUG_CTRL_RpRd, reg_data);
+
+				s2mf301_usbpd_read_reg(i2c, S2MF301_REG_ANALOG_OTP_0D, &reg_data);
+				reg_data &= ~S2MF301_REG_CC12_VCONN_MASK;
+				reg_data |= S2MF301_REG_CC2_VCONN_MASK;
+				s2mf301_usbpd_write_reg(i2c, S2MF301_REG_ANALOG_OTP_0D, reg_data);
 			}
 		}
 		if (cc2_val == USBPD_Rd) {
 			if (cc1_val == USBPD_Ra) {
+				s2mf301_info("%s, cc1 vconn\n", __func__);
+
 				s2mf301_usbpd_read_reg(i2c, S2MF301_REG_PLUG_CTRL_RpRd, &reg_data);
 				reg_data &= ~S2MF301_REG_PLUG_CTRL_RpRd_VCONN_MASK;
 				reg_data |= (S2MF301_REG_PLUG_CTRL_RpRd_PD1_VCONN |
 						S2MF301_REG_PLUG_CTRL_VCONN_MANUAL_EN);
 				s2mf301_usbpd_write_reg(i2c, S2MF301_REG_PLUG_CTRL_RpRd, reg_data);
+
+				s2mf301_usbpd_read_reg(i2c, S2MF301_REG_ANALOG_OTP_0D, &reg_data);
+				reg_data &= ~S2MF301_REG_CC12_VCONN_MASK;
+				reg_data |= S2MF301_REG_CC1_VCONN_MASK;
+				s2mf301_usbpd_write_reg(i2c, S2MF301_REG_ANALOG_OTP_0D, reg_data);
 			}
 		}
 	} else if (val == USBPD_VCONN_OFF) {
+		s2mf301_info("%s, vconn off\n", __func__);
 		s2mf301_usbpd_read_reg(i2c, S2MF301_REG_PLUG_CTRL_RpRd, &reg_data);
-				reg_data &= ~S2MF301_REG_PLUG_CTRL_RpRd_VCONN_MASK;
+		reg_data &= ~S2MF301_REG_PLUG_CTRL_RpRd_VCONN_MASK;
 		reg_data |= S2MF301_REG_PLUG_CTRL_VCONN_MANUAL_EN;
 		s2mf301_usbpd_write_reg(i2c, S2MF301_REG_PLUG_CTRL_RpRd, reg_data);
+
+		s2mf301_usbpd_read_reg(i2c, S2MF301_REG_ANALOG_OTP_0D, &reg_data);
+		reg_data &= ~S2MF301_REG_CC12_VCONN_MASK;
+		s2mf301_usbpd_write_reg(i2c, S2MF301_REG_ANALOG_OTP_0D, reg_data);
 	} else
 		return(-1);
 
@@ -2083,14 +2133,9 @@ static int s2mf301_get_vconn_source(void *_data, int *val)
 	struct usbpd_data *data = (struct usbpd_data *) _data;
 	struct s2mf301_usbpd_data *pdic_data = data->phy_driver_data;
 
-	/* TODO
-		set s2mf301 pdic register control */
-
-	if (pdic_data->vconn_source != *val) {
-		dev_info(pdic_data->dev, "%s, vconn_source(%d) != gpio val(%d)\n",
-				__func__, pdic_data->vconn_source, *val);
-		pdic_data->vconn_source = *val;
-	}
+	s2mf301_info("%s, vconn Soucre(%d)n", __func__,
+			pdic_data->vconn_source);
+	*val = pdic_data->vconn_source;
 
 	return 0;
 }
@@ -2568,12 +2613,14 @@ int s2mf301_usbpd_check_msg(void *_data, u64 *val)
 			}
 
 			if (data->protocol_rx.data_obj[0].structured_vdm.svid != 0xFF00) {
-				if (data->protocol_rx.data_obj[0].structured_vdm.svid == 0xeeee ||
-						data->protocol_rx.data_obj[0].structured_vdm.svid == 0x1748 ||
-							data->protocol_rx.data_obj[0].structured_vdm.svid == 0x04e8) {
+				if (data->protocol_rx.data_obj[0].structured_vdm.svid == 0xeeee
+						|| data->protocol_rx.data_obj[0].structured_vdm.svid == 0x1748
+						|| data->protocol_rx.data_obj[0].structured_vdm.svid == 0x04e8
+						|| data->protocol_rx.data_obj[0].structured_vdm.svid == 0xFF01) {
 					/* Ellisys VID 0xeeee */
 					/* MQP VID 0x1748 */
 					/* SAMSUNG VID 0x04e8 */
+					/* DP SID 0xFF01 */
 					dev_info(data->dev, "%s : SVID = [0x%x]\n", __func__, data->protocol_rx.data_obj[0].structured_vdm.svid);
 				} else if (data->protocol_rx.data_obj[0].unstructured_vdm.vendor_id == 0x1500) {
 					/* Ellisys Vendor_id 0x1500 */
@@ -2588,9 +2635,19 @@ int s2mf301_usbpd_check_msg(void *_data, u64 *val)
 
 			switch (vdm_command) {
 			case DisplayPort_Status_Update:
+#if IS_ENABLED(CONFIG_S2M_PDIC_DP_SUPPORT)
+				memcpy(data->policy.rx_dp_vdm, data->policy.rx_data_obj,
+						sizeof(data_obj_type) * USBPD_MAX_COUNT_MSG_OBJECT);
+				s2mf301_info("%s, copy to dpstatus buffer\n", __func__);
+#endif
 				SET_STATUS(val, VDM_DP_STATUS_UPDATE);
 				break;
 			case DisplayPort_Configure:
+#if IS_ENABLED(CONFIG_S2M_PDIC_DP_SUPPORT)
+				memcpy(data->policy.rx_dp_vdm, data->policy.rx_data_obj,
+						sizeof(data_obj_type) * USBPD_MAX_COUNT_MSG_OBJECT);
+				s2mf301_info("%s, copy to dpconfigure buffer\n", __func__);
+#endif
 				SET_STATUS(val, VDM_DP_CONFIGURE);
 				break;
 			case Attention:
@@ -3116,8 +3173,7 @@ void s2mf301_set_cc1_pull_down(struct s2mf301_usbpd_data *pdic_data, bool cc_en)
 	s2mf301_usbpd_read_reg(i2c, S2MF301_REG_ANALOG_OTP_07, &cc1_data);
 	cc1_data &= ~(S2MF301_REG_D2A_TC_FRSW1_MASK);
 
-	if (cc_en)
-		cc1_data |= (1 << S2MF301_REG_D2A_TC_FRSW1_SHIFT);
+	if (cc_en) cc1_data |= (1 << S2MF301_REG_D2A_TC_FRSW1_SHIFT);
 
 	s2mf301_usbpd_write_reg(i2c, S2MF301_REG_ANALOG_OTP_07, cc1_data);
 }
@@ -3130,8 +3186,7 @@ void s2mf301_set_cc2_pull_down(struct s2mf301_usbpd_data *pdic_data, bool cc_en)
 	s2mf301_usbpd_read_reg(i2c, S2MF301_REG_ANALOG_OTP_09, &cc2_data);
 	cc2_data &= ~(S2MF301_REG_D2A_TC_FRSW2_MASK);
 
-	if (cc_en)
-		cc2_data |= (1 << S2MF301_REG_D2A_TC_FRSW2_SHIFT);
+	if (cc_en) cc2_data |= (1 << S2MF301_REG_D2A_TC_FRSW2_SHIFT);
 
 	s2mf301_usbpd_write_reg(i2c, S2MF301_REG_ANALOG_OTP_09, cc2_data);
 }
@@ -3143,10 +3198,8 @@ void s2mf301_set_cc_ovp_state(struct s2mf301_usbpd_data *pdic_data, bool cc1_en,
 
 	s2mf301_usbpd_read_reg(i2c, S2MF301_REG_MAN_CTRL, &data);
 	data &= ~(S2MF301_REG_CC12_OVP_MASK);
-	if (cc1_en)
-		data |= S2MF301_REG_CC1_OVP_ON;
-	if (cc2_en)
-		data |= S2MF301_REG_CC2_OVP_ON;
+	if(cc1_en) data |= S2MF301_REG_CC1_OVP_ON;
+	if(cc2_en) data |= S2MF301_REG_CC2_OVP_ON;
 	s2mf301_usbpd_write_reg(i2c, S2MF301_REG_MAN_CTRL, data);
 	s2mf301_info("%s, CC_OVP_STATUS0(0x%x)\n", __func__, data);
 }
@@ -3294,7 +3347,7 @@ void s2mf301_usbpd_water_set_status(struct s2mf301_usbpd_data *pdic_data, int st
 		s2mf301_info("%s, PDIC DRY detected\n", __func__);
 		pdic_data->is_water_detect = false;
 #if IS_ENABLED(CONFIG_PDIC_NOTIFIER)
-		if (prev_status != status)
+		if(prev_status != status)
 			pdic_event_work(pd_data, PDIC_NOTIFY_DEV_MANAGER,
 				PDIC_NOTIFY_ID_WATER, 0, 0, 0);
 #endif
@@ -3331,7 +3384,7 @@ void s2mf301_usbpd_water_set_status(struct s2mf301_usbpd_data *pdic_data, int st
 			pdic_event_work(pd_data, PDIC_NOTIFY_DEV_MANAGER,
 				PDIC_NOTIFY_ID_POFF_WATER, 1, 0, 0);
 		}
-		if (prev_status != status)
+		if(prev_status != status)
 			pdic_event_work(pd_data, PDIC_NOTIFY_DEV_MANAGER,
 				PDIC_NOTIFY_ID_WATER, 1, 0, 0);
 #endif
@@ -3386,16 +3439,10 @@ static void s2mf301_usbpd_otg_attach(struct s2mf301_usbpd_data *pdic_data)
 	pdic_event_work(pd_data, PDIC_NOTIFY_DEV_USB, PDIC_NOTIFY_ID_USB,
 			1/*attach*/, USB_STATUS_NOTIFY_ATTACH_DFP/*drp*/, 0);
 	/* add to turn on external 5V */
-#if IS_ENABLED(CONFIG_USB_HOST_NOTIFY) && IS_ENABLED(CONFIG_DISABLE_LOCKSCREEN_USB_RESTRICTION)
-	if (!is_blocked(o_notify, NOTIFY_BLOCK_TYPE_HOST)) {
-#endif
 #if IS_ENABLED(CONFIG_PM_S2MF301)
-		s2mf301_usbpd_check_vbus(pdic_data, 800, VBUS_OFF);
+	s2mf301_usbpd_check_vbus(pdic_data, 800, VBUS_OFF);
 #endif
-		usbpd_manager_vbus_turn_on_ctrl(pd_data, VBUS_ON);
-#if IS_ENABLED(CONFIG_USB_HOST_NOTIFY) && IS_ENABLED(CONFIG_DISABLE_LOCKSCREEN_USB_RESTRICTION)
-	}
-#endif
+	usbpd_manager_vbus_turn_on_ctrl(pd_data, VBUS_ON);
 	usbpd_manager_acc_handler_cancel(dev);
 out:
 #if IS_ENABLED(CONFIG_ARCH_QCOM)
@@ -3613,6 +3660,55 @@ static void s2mf301_vbus_short_check(struct s2mf301_usbpd_data *pdic_data)
 }
 
 #if IS_ENABLED(CONFIG_S2MF301_TYPEC_WATER)
+#if IS_ENABLED(CONFIG_S2M_PDIC_DP_SUPPORT)
+static void s2mf301_usbpd_disable_water(void *_data, int en)
+{
+	struct usbpd_data *pd_data = _data;
+	struct s2mf301_usbpd_data *pdic_data = pd_data->phy_driver_data;
+	union power_supply_propval value;
+
+	s2mf301_info("%s, en(%d)\n", __func__, en);
+
+	value.intval = en ? true : false;
+	pdic_data->psy_muic->desc->set_property(pdic_data->psy_muic,
+			(enum power_supply_property)POWER_SUPPLY_LSI_PROP_SBU_OVP_STATE, &value);
+	pdic_data->water.event = en ? S2M_WATER_EVENT_DP_ATTACH : S2M_WATER_EVENT_DP_DETACH;
+	schedule_delayed_work(&pdic_data->water.state_work, 0);
+}
+
+static void s2mf301_usbpd_set_fac_sbu(void *_data, int en)
+{
+	struct usbpd_data *pd_data = _data;
+	struct s2mf301_usbpd_data *pdic_data = pd_data->phy_driver_data;
+
+	s2mf301_info("%s, en(%d)\n", __func__, en);
+
+	if (en == 0) {
+		//open drain
+		pdic_data->water.water_det_en(pdic_data->water.pmeter, false);
+		pdic_data->water.pm_enable(pdic_data->water.pmeter, CONTINUOUS_MODE, false, S2MF301_PM_TYPE_GPADC12);
+	} else {
+		//default mode
+	}
+}
+
+static void s2mf301_usbpd_get_fac_sbu(void *_data, int *vsbu1, int *vsbu2)
+{
+	struct usbpd_data *pd_data = _data;
+	struct s2mf301_usbpd_data *pdic_data = pd_data->phy_driver_data;
+	struct s2mf301_water_data *water = &pdic_data->water;
+
+
+	water->pm_enable(water->pmeter, REQUEST_RESPONSE_MODE, true, S2MF301_PM_TYPE_GPADC12);
+	msleep(50);
+
+	*vsbu1 = water->pm_get_value(water->pmeter, S2MF301_PM_TYPE_GPADC1);
+	*vsbu2 = water->pm_get_value(water->pmeter, S2MF301_PM_TYPE_GPADC2);
+
+	water->pm_enable(water->pmeter, REQUEST_RESPONSE_MODE, false, S2MF301_PM_TYPE_GPADC12);
+}
+#endif
+
 static int s2mf301_power_off_water_check(struct s2mf301_usbpd_data *pdic_data)
 {
 	struct i2c_client *i2c = pdic_data->i2c;
@@ -3792,6 +3888,26 @@ static void s2mf301_usbpd_set_vbus_dischg_gpio(struct s2mf301_usbpd_data
 				msecs_to_jiffies(120));
 }
 
+static void s2mf301_usbpd_set_vctrl_otg_gpio(struct s2mf301_usbpd_data *pdic_data, int val)
+{
+	if (!gpio_is_valid(pdic_data->vctrl_otg_gpio))
+		return;
+
+	gpio_direction_output(pdic_data->vctrl_otg_gpio, val);
+	s2mf301_info("%s vctrl_otg(%d)\n", __func__,
+			gpio_get_value(pdic_data->vctrl_otg_gpio));
+}
+
+#if IS_ENABLED(CONFIG_S2M_PDIC_DP_SUPPORT)
+static void s2mf301_ops_set_vctrl_otg_gpio(void *_data, int en)
+{
+	struct usbpd_data *data = (struct usbpd_data *) _data;
+	struct s2mf301_usbpd_data *pdic_data = data->phy_driver_data;
+
+	s2mf301_usbpd_set_vctrl_otg_gpio(pdic_data, en);
+}
+#endif
+
 static void s2mf301_usbpd_detach_init(struct s2mf301_usbpd_data *pdic_data)
 {
 	struct device *dev = pdic_data->dev;
@@ -3810,7 +3926,9 @@ static void s2mf301_usbpd_detach_init(struct s2mf301_usbpd_data *pdic_data)
 	s2mf301_usbpd_check_pps_irq(pd_data, false);
 	s2mf301_usbpd_check_pps_irq_reduce_clk(pd_data, false);
 	s2mf301_usbpd_set_vbus_dischg_gpio(pdic_data, 1);
+	s2mf301_usbpd_set_vctrl_otg_gpio(pdic_data, 0);
 	s2mf301_usbpd_set_pd_control(pdic_data, USBPD_CC_OFF);
+	s2mf301_set_vconn_source(pd_data, USBPD_VCONN_OFF);
 #if IS_ENABLED(CONFIG_DUAL_ROLE_USB_INTF)
 	if (pdic_data->power_role_dual == DUAL_ROLE_PROP_PR_SRC)
 		usbpd_manager_vbus_turn_on_ctrl(pd_data, VBUS_OFF);
@@ -3848,6 +3966,11 @@ static void s2mf301_usbpd_detach_init(struct s2mf301_usbpd_data *pdic_data)
 		if ((reg_data & S2MF301_REG_PLUG_CTRL_MODE_MASK) != S2MF301_REG_PLUG_CTRL_DRP) {
 			if (pdic_data->is_manual_cc_open)
 				s2mf301_info("%s, CC_OPEN(0x%x)\n", __func__, pdic_data->is_manual_cc_open);
+#if IS_ENABLED(CONFIG_S2MF301_TYPEC_WATER)
+			else if (pdic_data->water.status == S2M_WATER_STATUS_WATER) {
+				s2mf301_info("%s, water detected, skip OTP_MODE\n", __func__);
+			}
+#endif
 			else {
 				reg_data |= S2MF301_REG_PLUG_CTRL_DRP;
 				s2mf301_usbpd_write_reg(i2c, S2MF301_REG_PLUG_CTRL_PORT, reg_data);
@@ -3877,7 +4000,6 @@ static void s2mf301_usbpd_detach_init(struct s2mf301_usbpd_data *pdic_data)
 	pd_data->pd_noti.sink_status.rp_currentlvl = RP_CURRENT_LEVEL_NONE;
 #endif
 	s2mf301_usbpd_reg_init(pdic_data);
-	s2mf301_set_vconn_source(pd_data, USBPD_VCONN_OFF);
 }
 
 static void s2mf301_usbpd_notify_detach(struct s2mf301_usbpd_data *pdic_data)
@@ -3896,6 +4018,7 @@ static void s2mf301_usbpd_notify_detach(struct s2mf301_usbpd_data *pdic_data)
 							REG_RID_OPEN/*rid*/, 0, 0);
 
 	usbpd_manager_acc_detach(dev);
+	usbpd_manager_exit_mode(pd_data, TypeC_DP_SUPPORT);
 	if (pdic_data->is_host > HOST_OFF || pdic_data->is_client > CLIENT_OFF) {
 		/* usb or otg */
 		dev_info(dev, "%s %d: is_host = %d, is_client = %d\n", __func__,
@@ -4199,6 +4322,10 @@ static int s2mf301_check_port_detect(struct s2mf301_usbpd_data *pdic_data)
 	s2mf301_ops_set_manual_retry(pd_data, 0);
 
 #if IS_ENABLED(CONFIG_S2MF301_TYPEC_WATER) && !IS_ENABLED(CONFIG_SEC_FACTORY)
+	if (pdic_data->water.status == S2M_WATER_STATUS_WATER) {
+		s2mf301_info("%s, Water already Detected, skip attach(attach 0x%x)\n", __func__, data);
+		return -1;
+	}
 	if ((data & S2MF301_PR_MASK) == S2MF301_PDIC_SINK) {
 		dev_info(dev, "SINK\n");
 		pdic_data->water.event = S2M_WATER_EVENT_ATTACH_AS_SNK;
@@ -4340,10 +4467,20 @@ static int s2mf301_check_port_detect(struct s2mf301_usbpd_data *pdic_data)
 				dev_err(&i2c->dev, "Failed to enable vconn LDO: %d\n", ret);
 		}
 
+#if IS_ENABLED(CONFIG_S2M_PDIC_DP_SUPPORT)
+		/* Some CtoDP cables are Rd change 5.1k->3.xk */
+		s2mf301_usbpd_set_threshold(pdic_data, PLUG_CTRL_RD,
+						S2MF301_THRESHOLD_171MV);
+#endif
 		s2mf301_set_vconn_source(pd_data, USBPD_VCONN_ON);
 
 //		msleep(tTypeCSinkWaitCap); /* dont over 310~620ms(tTypeCSinkWaitCap) */
 		msleep(100); /* dont over 310~620ms(tTypeCSinkWaitCap) */
+
+#if IS_ENABLED(CONFIG_S2M_PDIC_DP_SUPPORT)
+		s2mf301_usbpd_set_threshold(pdic_data, PLUG_CTRL_RD,
+						S2MF301_THRESHOLD_214MV);
+#endif
 	} else {
 		dev_err(dev, "%s, PLUG Error\n", __func__);
 		ret = -1;
@@ -4526,6 +4663,27 @@ static void s2mf301_usbpd_plug_work(struct work_struct *work)
 	s2mf301_irq_thread(-1, pdic_data);
 }
 
+static void s2mf301_usbpd_clear_hardreset(struct work_struct *work)
+{
+	struct s2mf301_usbpd_data *pdic_data =
+		container_of(work, struct s2mf301_usbpd_data, clear_hardreset.work);
+	struct usbpd_data *pd_data = dev_get_drvdata(pdic_data->dev);
+
+	s2mf301_info("%s, Clear hardreset flag\n", __func__);
+	pd_data->hardreset_flag = false;
+}
+
+static void s2mf301_usbpd_check_hardreset(void *_data)
+{
+	struct usbpd_data *data = (struct usbpd_data *) _data;
+	struct s2mf301_usbpd_data *pdic_data = data->phy_driver_data;
+	struct usbpd_data *pd_data = dev_get_drvdata(pdic_data->dev);
+
+	s2mf301_info("%s, Setting hardreset flag\n", __func__);
+	pd_data->hardreset_flag = true;
+	schedule_delayed_work(&pdic_data->clear_hardreset, msecs_to_jiffies(2500));
+}
+
 #if IS_ENABLED(CONFIG_ARCH_QCOM)
 static void s2mf301_usbpd_water_wake_work(struct work_struct *work)
 {
@@ -4547,6 +4705,7 @@ static int s2mf301_usbpd_reg_init(struct s2mf301_usbpd_data *_data)
 
 	s2mf301_usbpd_read_reg(i2c, S2MF301_REG_MSG_SEND_CON, &data);
 	data |= S2MF301_REG_MSG_SEND_CON_HARD_EN;
+	data &= ~S2MF301_REG_MSG_SEND_CON_OP_MODE;
 	s2mf301_usbpd_write_reg(i2c, S2MF301_REG_MSG_SEND_CON, data);
 
 	s2mf301_usbpd_read_reg(i2c, S2MF301_REG_PD_CTRL_2, &data);
@@ -4585,6 +4744,19 @@ static int s2mf301_usbpd_reg_init(struct s2mf301_usbpd_data *_data)
 	s2mf301_usbpd_write_reg(i2c, 0x24, 0x1 << 4 | 0x01 << 7);
 	s2mf301_usbpd_write_reg(i2c, 0x24, 0);
 	s2mf301_usbpd_write_reg(i2c, 0x25, 0);
+
+	/* Rp 20ms */
+	s2mf301_usbpd_write_reg(i2c, 0x24, 0x40);
+	s2mf301_usbpd_write_reg(i2c, 0x25, 0x02);
+	s2mf301_usbpd_write_reg(i2c, 0x24, 0xC0);
+	usleep_range(100, 110);
+	s2mf301_usbpd_write_reg(i2c, 0x24, 0x00);
+	/* Rd 60ms */
+	s2mf301_usbpd_write_reg(i2c, 0x24, 0x30);
+	s2mf301_usbpd_write_reg(i2c, 0x25, 0x06);
+	s2mf301_usbpd_write_reg(i2c, 0x24, 0xB0);
+	usleep_range(100, 110);
+	s2mf301_usbpd_write_reg(i2c, 0x24, 0x00);
 
 	/* enable support acc */
 	s2mf301_usbpd_read_reg(i2c, S2MF301_REG_PLUG_CTRL_PD_HOLD, &data);
@@ -4761,7 +4933,9 @@ static void s2mf301_usbpd_init_configure(struct s2mf301_usbpd_data *_data)
 	_data->rid = rid;
 
 	_data->detach_valid = false;
-
+#if IS_ENABLED(CONFIG_S2MF301_TYPEC_VBUS_DISCONNECT)
+	_data->is_rid_attached = false;
+#endif
 	/* if there is rid, assume that booted by normal mode */
 	if (rid) {
 		if (s2mf301_usbpd_lpm_check(_data)) {
@@ -4777,6 +4951,9 @@ static void s2mf301_usbpd_init_configure(struct s2mf301_usbpd_data *_data)
 
 		_data->lpm_mode = false;
 		_data->is_factory_mode = false;
+#if IS_ENABLED(CONFIG_S2MF301_TYPEC_VBUS_DISCONNECT)
+		_data->is_rid_attached = true;
+#endif
 		s2mf301_usbpd_set_rp_scr_sel(_data, PLUG_CTRL_RP80);
 #if IS_ENABLED(CONFIG_SEC_FACTORY)
 #if 0	/* TBD */
@@ -4925,6 +5102,21 @@ static int of_s2mf301_dt(struct device *dev,
 		s2mf301_info("%s vbus_discharging = %d\n",
 					__func__, _data->vbus_dischg_gpio);
 
+	_data->vctrl_otg_gpio = of_get_named_gpio(np_usbpd,
+						"usbpd,vctrl_otg", 0);
+	if (gpio_is_valid(_data->vctrl_otg_gpio)) {
+		s2mf301_info("%s vctrl_otg = %d\n",
+					__func__, _data->vctrl_otg_gpio);
+
+		ret = devm_gpio_request(dev, _data->vctrl_otg_gpio, "vctrl_otg");
+		if (ret) {
+			dev_err(dev, "failed vctrl_otg_gpio request\n");
+			return ret;
+		}
+		gpio_direction_output(_data->vctrl_otg_gpio, 0);
+	} else
+		dev_info(dev, "vctrl_otg_gpio is not used\n");
+
 	if (of_find_property(np_usbpd, "vconn-en", NULL))
 		_data->vconn_en = true;
 	else
@@ -4938,8 +5130,12 @@ static int of_s2mf301_dt(struct device *dev,
 	return ret;
 }
 
+#if (KERNEL_VERSION(6, 3, 0) <= LINUX_VERSION_CODE)
+static int s2mf301_usbpd_probe(struct i2c_client *i2c)
+#else
 static int s2mf301_usbpd_probe(struct i2c_client *i2c,
 				const struct i2c_device_id *id)
+#endif
 {
 	struct i2c_adapter *adapter = to_i2c_adapter(i2c->dev.parent);
 	struct s2mf301_usbpd_data *pdic_data;
@@ -4947,6 +5143,12 @@ static int s2mf301_usbpd_probe(struct i2c_client *i2c,
 	struct device *dev = &i2c->dev;
 	int ret = 0;
 	union power_supply_propval val;
+
+	if ((power_supply_get_by_name("s2mf301-pmeter") == NULL ||
+			power_supply_get_by_name("muic-manager") == NULL)) {
+		pr_info("%s, pmeter or muic is not probed\n", __func__);
+		return -EPROBE_DEFER;
+	}
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA)) {
 		dev_err(dev, "%s: i2c functionality check error\n", __func__);
@@ -5065,6 +5267,8 @@ static int s2mf301_usbpd_probe(struct i2c_client *i2c,
 	pdic_data->rprd_mode_change = s2mf301_rprd_mode_change;
 #endif
 
+	INIT_DELAYED_WORK(&pdic_data->clear_hardreset,
+			s2mf301_usbpd_clear_hardreset);
 	INIT_DELAYED_WORK(&pdic_data->plug_work,
 		s2mf301_usbpd_plug_work);
 	INIT_DELAYED_WORK(&pdic_data->vbus_dischg_off_work,
@@ -5072,7 +5276,6 @@ static int s2mf301_usbpd_probe(struct i2c_client *i2c,
 #if IS_ENABLED(CONFIG_S2MF301_TYPEC_WATER)
 	INIT_DELAYED_WORK(&pdic_data->check_facwater,
 		s2mf301_usbpd_check_facwater);
-
 #endif
 
 #if IS_ENABLED(CONFIG_ARCH_QCOM)
@@ -5247,10 +5450,18 @@ static struct of_device_id s2mf301_usbpd_i2c_dt_ids[] = {
 
 static void s2mf301_usbpd_shutdown(struct i2c_client *i2c)
 {
-	struct s2mf301_usbpd_data *_data = i2c_get_clientdata(i2c);
+	struct usbpd_data *pd_data = dev_get_drvdata(&i2c->dev);
+	struct s2mf301_usbpd_data *pdic_data = pd_data ->phy_driver_data;
 
-	if (!_data->i2c)
-		return;
+	s2mf301_info("%s: ++, %d\n", __func__, i2c->irq);
+	disable_irq(i2c->irq);
+	free_irq(i2c->irq, pdic_data);
+	s2mf301_info("%s: s2mf301 free_irq name\n", __func__);
+
+#if IS_ENABLED(CONFIG_S2MF301_TYPEC_WATER)
+	cancel_delayed_work_sync(&pdic_data->water.state_work);
+	s2mf301_info("%s: water workqueue is canceled.\n", __func__);
+#endif
 }
 
 static usbpd_phy_ops_type s2mf301_ops = {
@@ -5260,6 +5471,7 @@ static usbpd_phy_ops_type s2mf301_ops = {
 	.soft_reset		= s2mf301_soft_reset,
 	.set_power_role		= s2mf301_set_power_role,
 	.get_power_role		= s2mf301_get_power_role,
+	.check_hardreset	= s2mf301_usbpd_check_hardreset,
 	.set_data_role		= s2mf301_set_data_role,
 	.get_data_role		= s2mf301_get_data_role,
 	.set_vconn_source	= s2mf301_set_vconn_source,
@@ -5316,6 +5528,12 @@ static usbpd_phy_ops_type s2mf301_ops = {
 	.ops_check_pps_irq		= s2mf301_usbpd_check_pps_irq,
 	.ops_manual_retry	= s2mf301_ops_set_manual_retry,
 	.ops_cc_hiccup		= s2mf301_ops_cc_hiccup,
+#if IS_ENABLED(CONFIG_S2M_PDIC_DP_SUPPORT)
+	.ops_disable_water	= s2mf301_usbpd_disable_water,
+	.ops_set_fac_sbu	= s2mf301_usbpd_set_fac_sbu,
+	.ops_get_fac_sbu	= s2mf301_usbpd_get_fac_sbu,
+	.ops_set_vctrl_otg	= s2mf301_ops_set_vctrl_otg_gpio,
+#endif
 };
 
 #if IS_ENABLED(CONFIG_PM)

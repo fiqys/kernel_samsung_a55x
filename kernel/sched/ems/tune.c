@@ -117,6 +117,7 @@ static int emstune_notify(void);
 static void emstune_mode_change(int next_mode)
 {
 	unsigned long flags;
+	char msg[32];
 
 	spin_lock_irqsave(&emstune.lock, flags);
 
@@ -132,6 +133,8 @@ static void emstune_mode_change(int next_mode)
 	spin_unlock_irqrestore(&emstune.lock, flags);
 
 	send_mode_to_user(emstune.cur_mode);
+	snprintf(msg, sizeof(msg), "NOTI_MODE=%d", emstune.cur_mode);
+	send_uevent(msg);
 }
 
 static void emstune_level_change(int next_level)

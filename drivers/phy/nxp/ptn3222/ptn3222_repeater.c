@@ -251,8 +251,12 @@ static struct ptn3222_pdata *ptn3222_parse_dt(struct device *dev)
 	return pdata;
 }
 
+#if (KERNEL_VERSION(6, 3, 0) <= LINUX_VERSION_CODE)
+static int ptn3222_probe(struct i2c_client *client)
+#else
 static int ptn3222_probe(struct i2c_client *client,
 				const struct i2c_device_id *id)
+#endif
 {
 	struct ptn3222_ddata *ddata;
 	struct ptn3222_pdata *pdata;

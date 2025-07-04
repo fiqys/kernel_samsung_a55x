@@ -118,13 +118,13 @@
 };
 #endif
 
-#if 1800000 && 3000000
+#if 3000000 && 3000000
 &s_l13_reg {
-	regulator-name = "vmmc";
-	regulator-min-microvolt = <1800000>;
+	regulator-name = "tsp_avdd";
+	regulator-min-microvolt = <3000000>;
 	regulator-max-microvolt = <3000000>;
 	 regulator-ramp-delay = <12000>;regulator-initial-mode = <3>;
-	/delete-property/ regulator-always-on;
+	/delete-property/ regulator-always-on;/delete-property/ regulator-boot-on;
 };
 #endif
 

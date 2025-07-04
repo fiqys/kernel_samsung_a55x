@@ -36,8 +36,9 @@
 #include <linux/muic/common/muic.h>
 
 #include <linux/usb/typec/common/pdic_param.h>
+#if IS_ENABLED(CONFIG_USB_NOTIFIER)
 #include <linux/usb_notify.h>
-
+#endif
 struct m_p_l_data {
 	struct muic_platform_data *pdata;
 	struct muic_share_data *sdata;
@@ -553,6 +554,12 @@ int muic_platform_handle_attach(struct muic_share_data *sdata,
 	case ATTACHED_DEV_TIMEOUT_OPEN_MUIC:
 		muic_platform_switch_usb_path(sdata);
 		break;
+#if IS_ENABLED(CONFIG_MUIC_HV_SUPPORT_POGO_DOCK)
+	case ATTACHED_DEV_POGO_DOCK_MUIC:
+	case ATTACHED_DEV_POGO_DOCK_5V_MUIC:
+	case ATTACHED_DEV_POGO_DOCK_9V_MUIC:
+		break;
+#endif /* CONFIG_MUIC_HV_SUPPORT_POGO_DOCK */
 	default:
 		pr_warn("%s unsupported dev(%d)\n", __func__,
 				new_dev);

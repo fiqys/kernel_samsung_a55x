@@ -101,7 +101,7 @@ static long smartpa_sysfs_shared_ioctl(struct file *file,
 {
 	int ret = 0, check = 0;
 	int temp[5] = {0};
-	struct smartpa_msg msg = {{0}, {0} };
+	struct smartpa_msg msg = {{0}, {0}};
 	struct smartpa_prars prars = {0};
 	uint32_t re_calib[2] = {0};
 
@@ -198,17 +198,6 @@ static long smartpa_sysfs_ioctl(struct file *file,
 	return smartpa_sysfs_shared_ioctl(file, cmd, (void __user *)arg);
 }
 
-#ifdef CONFIG_COMPAT
-static long smartpa_compact_sysfs_ioctl(struct file *file,
-	unsigned int cmd, unsigned long arg)
-{
-	int ret = 0;
-	pr_debug("%s...\n", __func__);
-	ret = smartpa_sysfs_shared_ioctl(file, cmd, compat_ptr(arg));
-	return ret;
-}
-#endif
-
 static int smartpa_sysfs_open(struct inode *inode, struct file *file)
 {
 	pr_info("[SmartPA]%s\n", __func__);
@@ -227,9 +216,6 @@ static const struct file_operations smartpa_sysfs_fileops = {
 	.read  = smartpa_sysfs_read,
 	.write = smartpa_sysfs_write,
 	.unlocked_ioctl = smartpa_sysfs_ioctl,
-#ifdef CONFIG_COMPAT
-	.compat_ioctl =   smartpa_compact_sysfs_ioctl,
-#endif
 	.release = smartpa_sysfs_release,
 };
 

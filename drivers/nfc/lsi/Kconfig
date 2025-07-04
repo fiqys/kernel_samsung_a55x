@@ -100,6 +100,27 @@ config SEC_NFC_LOGGER
 	  but will not included at dumpstate log.
 	  so need to copy this file to log folder.
 
+config NFC_LOGGER_LOWMEM
+	bool "NFC logger low memory"
+	default n
+	help
+	  Reduces NFC log buffer size.
+	  This option reduces the size of the nfc log buffer in order to save memory on low-memory devices.
+ 	  By reducing its size, we can free up memory for other purposes,
+	  but it may also result in some log messages being lost if the buffer fills up quickly.
+
+config MTK_CLKBUF_NFC
+	bool "MTK clkbuf nfc"
+	default n
+	help
+	  MTK clkbuf nfc.
+
+config SEC_NFC_DUPLICATED_IRQ_WQ
+	bool "NFC duplicated irq wq"
+	default n
+	help
+	  Enable NFC duplicated irq.
+
 config SEC_NFC_DUPLICATED_IRQ_WQ_LSI
 	bool "NFC duplicated irq wq lsi"
 	default n
@@ -117,6 +138,14 @@ config SEC_NFC_DUPLICATED_IRQ_WQ_QC
 	  add the IRQF_NO_SUSPEND flag during interrupt registration
 	  and do not use enable_irq_wake() api to configure the GPIO
 	  as wakeup capable.
+
+config SEC_NFC_WAIT_FOR_DISABLE_COMBO_RESET_IRQ
+	bool "nfc wait for disable combo reset irq"
+	default n
+	help
+	  The first irq of disable combo reset command should be skipped,
+	  but there is a problem that nfc is not on because irq may be pushed in.
+	  After disable combo reset command, modify to wait for irq
 
 config SEC_NFC_WAKELOCK_METHOD
         int "nfc wakelock method"
@@ -272,3 +301,10 @@ config SEC_NFC_TEST_FOR_ONLY_UML
 	depends on KUNIT
 	help
 	  kunit test for slsi nfc 2
+
+config SEC_NFC_EINT_EXYNOS
+        bool "enable eint mode for nfc clk"
+        help
+          This feature enable eint mode for nfc clk
+          Need to trigger clk by clk req
+          It is necessary for slsi ap.

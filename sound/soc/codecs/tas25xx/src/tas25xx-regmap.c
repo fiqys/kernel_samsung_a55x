@@ -36,6 +36,7 @@
 #include <linux/irq.h>
 #include <linux/pm.h>
 #include <linux/version.h>
+#include "../inc/tas25xx-ext.h"
 #include "../inc/tas25xx.h"
 #include "../inc/tas25xx-logic.h"
 #include "../inc/tas25xx-device.h"
@@ -44,9 +45,7 @@
 #include "../inc/tas25xx-regbin-parser.h"
 #include "../inc/tas25xx-misc.h"
 #include <linux/kobject.h>
-#if IS_ENABLED(CONFIG_TAS25XX_ALGO)
 #include "../algo/inc/tas_smart_amp_v2.h"
-#endif /*CONFIG_TAS25XX_ALGO*/
 /*For mixer_control implementation*/
 #define MAX_STRING	200
 #define SYS_NODE
@@ -56,17 +55,38 @@
 static const char *dts_tag[][2] = {
 	{
 		"ti,reset-gpio",
-		"ti,irq-gpio"
+		"ti,irq-gpio",
 	},
 	{
 		"ti,reset-gpio2",
 		"ti,irq-gpio2"
+	},
+	{
+		"ti,reset-gpio3",
+		"ti,irq-gpio3",
+	},
+	{
+		"ti,reset-gpio4",
+		"ti,irq-gpio4",
 	}
 };
 
-static const char *reset_gpio_label[2] = {
-	"TAS25XX_RESET", "TAS25XX_RESET2"
+static const char *reset_gpio_label[MAX_CHANNELS] = {
+	"TAS25XX_RESET", "TAS25XX_RESET2", "TAS25XX_RESET3", "TAS25XX_RESET4",
 };
+
+static int ti_amp_state[MAX_CHANNELS];
+static struct i2c_err_data i2cerr[MAX_CHANNELS];
+int tas25xx_get_state(uint32_t id)
+{
+	if (id >= MAX_CHANNELS) {
+		pr_err("tas25xx: invalid amp id %d\n", id);
+		return TAS_AMP_ERR_EINVAL;
+	}
+
+	return ti_amp_state[id];
+}
+EXPORT_SYMBOL_GPL(tas25xx_get_state);
 
 static void (*tas_i2c_err_fptr)(uint32_t);
 
@@ -76,10 +96,70 @@ void tas25xx_register_i2c_error_callback(void (*i2c_err_cb)(uint32_t))
 }
 EXPORT_SYMBOL_GPL(tas25xx_register_i2c_error_callback);
 
+static int s_last_i2c_error;
+
 static inline void tas25xx_post_i2c_err_to_platform(uint32_t i2caddr)
 {
+	pr_err("tas25xx: I2C err on 0x%02x, notify on cb=%d\n",
+		i2caddr, tas_i2c_err_fptr ? 1 : 0);
 	if (tas_i2c_err_fptr)
 		tas_i2c_err_fptr(i2caddr);
+}
+
+int tas25xx_check_last_i2c_error_n_reset(void)
+{
+	int temp = s_last_i2c_error;
+	s_last_i2c_error = 0;
+	return temp;
+}
+
+static void tas25xx_update_i2cerr_bd(uint32_t ch)
+{
+	if (ch >= MAX_CHANNELS)
+		return;
+
+	if ((i2cerr[ch].err_count_total
+		+ i2cerr[ch].err_count) >= UINT_MAX)
+		i2cerr[ch].err_count_total = UINT_MAX;
+	else
+		i2cerr[ch].err_count_total += i2cerr[ch].err_count;
+}
+
+static struct i2c_err_data *tas25xx_get_i2cerr_bd_for_ch(uint32_t ch)
+{
+	if (ch >= MAX_CHANNELS)
+		return NULL;
+
+	return &i2cerr[ch];
+}
+
+static void tas25xx_i2cerr_bd_reset(uint32_t ch)
+{
+	if (ch >= MAX_CHANNELS)
+		return;
+
+	i2cerr[ch].err_count = 0;
+}
+
+void tas25xx_log_i2cerr_stats(struct tas25xx_priv *p_tas25xx)
+{
+	int i;
+	struct i2c_err_data *d;
+	struct linux_platform *plat_data;
+
+	if (!p_tas25xx)
+		return;
+
+	plat_data = (struct linux_platform *)p_tas25xx->platform_data;
+
+	for (i = 0; i < p_tas25xx->ch_count; i++) {
+		tas25xx_update_i2cerr_bd(i);
+		d = tas25xx_get_i2cerr_bd_for_ch(i);
+		dev_info(plat_data->dev,
+			"i2c-bigdata: ch=%d i2cerr=%u (total=%u)",
+			i, d->err_count, d->err_count_total);
+		tas25xx_i2cerr_bd_reset(i);
+	}
 }
 
 static int tas25xx_regmap_write(void *plat_data, uint32_t i2c_addr,
@@ -99,7 +179,11 @@ static int tas25xx_regmap_write(void *plat_data, uint32_t i2c_addr,
 		tas25xx_post_i2c_err_to_platform(i2c_addr);
 		mdelay(20);
 		retry_count--;
+		i2cerr[channel].err_count++;
 	}
+
+	if (ret)
+		s_last_i2c_error = ret;
 
 	return ret;
 }
@@ -122,7 +206,11 @@ static int tas25xx_regmap_bulk_write(void *plat_data, uint32_t i2c_addr,
 		tas25xx_post_i2c_err_to_platform(i2c_addr);
 		mdelay(20);
 		retry_count--;
+		i2cerr[channel].err_count++;
 	}
+
+	if (ret)
+		s_last_i2c_error = ret;
 
 	return ret;
 }
@@ -144,7 +232,11 @@ static int tas25xx_regmap_read(void *plat_data, uint32_t i2c_addr,
 		tas25xx_post_i2c_err_to_platform(i2c_addr);
 		mdelay(20);
 		retry_count--;
+		i2cerr[channel].err_count++;
 	}
+
+	if (ret)
+		s_last_i2c_error = ret;
 
 	return ret;
 }
@@ -167,7 +259,11 @@ static int tas25xx_regmap_bulk_read(void *plat_data, uint32_t i2c_addr,
 		tas25xx_post_i2c_err_to_platform(i2c_addr);
 		mdelay(20);
 		retry_count--;
+		i2cerr[channel].err_count++;
 	}
+
+	if (ret)
+		s_last_i2c_error = ret;
 
 	return ret;
 }
@@ -190,7 +286,11 @@ static int tas25xx_regmap_update_bits(void *plat_data, uint32_t i2c_addr,
 		tas25xx_post_i2c_err_to_platform(i2c_addr);
 		mdelay(20);
 		retry_count--;
+		i2cerr[channel].err_count++;
 	}
+
+	if (ret)
+		s_last_i2c_error = ret;
 
 	return ret;
 }
@@ -266,7 +366,6 @@ static int tas25xx_dev_write(struct tas25xx_priv *p_tas25xx, int32_t chn,
 			TAS25XX_BOOK_ID(reg),
 			TAS25XX_PAGE_ID(reg),
 			TAS25XX_PAGE_REG(reg), value);
-
 	}
 
 	/* Switch book to 0 */
@@ -443,7 +542,7 @@ static const struct reg_default tas25xx_reg_defaults[] = {
 	{ TAS25XX_PAGECTL_REG, 0x00 },
 };
 
-static const struct regmap_config tas25xx_i2c_regmap = {
+static struct regmap_config tas25xx_i2c_regmap = {
 	.reg_bits = 8,
 	.val_bits = 8,
 	.writeable_reg = tas25xx_writeable,
@@ -456,40 +555,14 @@ static const struct regmap_config tas25xx_i2c_regmap = {
 	.cache_type = REGCACHE_RBTREE,
 };
 
-#define TEST_HW_RESET 0
-
 static void tas25xx_hw_reset(struct tas25xx_priv *p_tas25xx)
 {
 	struct linux_platform *plat_data = NULL;
 	int i = 0;
-#if TEST_HW_RESET
-	uint32_t regval_b = 0;
-	uint32_t regval_c = 0;
-	uint32_t regval_d = 0;
-#endif
 
 	plat_data = (struct linux_platform *) p_tas25xx->platform_data;
 
 	dev_info(plat_data->dev, "Before HW reset\n");
-#if TEST_HW_RESET
-	p_tas25xx->update_bits(p_tas25xx, 0, 0xb, 0x40, 0x40);
-	p_tas25xx->update_bits(p_tas25xx, 0, 0xb, 0x3F, 0x07);
-
-	p_tas25xx->update_bits(p_tas25xx, 0, 0xc, 0x40, 0x40);
-	p_tas25xx->update_bits(p_tas25xx, 0, 0xc, 0x3F, 0x08);
-
-	p_tas25xx->update_bits(p_tas25xx, 0, 0xd, 0x40, 0x40);
-	p_tas25xx->update_bits(p_tas25xx, 0, 0xd, 0x3F, 0x09);
-
-	dev_info(plat_data->dev, "----START----\n");
-
-	p_tas25xx->read(p_tas25xx, 0, 0xb, &regval_b);
-	p_tas25xx->read(p_tas25xx, 0, 0xc, &regval_c);
-	p_tas25xx->read(p_tas25xx, 0, 0xd, &regval_d);
-
-	dev_info(plat_data->dev, "%02x %02x %02x",
-		regval_b, regval_c, regval_d);
-#endif
 
 	for (i = 0; i < p_tas25xx->ch_count; i++) {
 		if (gpio_is_valid(p_tas25xx->devs[i]->reset_gpio)) {
@@ -508,19 +581,9 @@ static void tas25xx_hw_reset(struct tas25xx_priv *p_tas25xx)
 			gpio_direction_output(p_tas25xx->devs[i]->reset_gpio, 1);
 		p_tas25xx->devs[i]->mn_current_book = -1;
 	}
-	msleep(20);
+	usleep_range(10000, 10100);
 
 	dev_info(plat_data->dev, "After HW reset\n");
-
-#if TEST_HW_RESET
-	p_tas25xx->read(p_tas25xx, 0, 0xb, &regval_b);
-	p_tas25xx->read(p_tas25xx, 0, 0xc, &regval_c);
-	p_tas25xx->read(p_tas25xx, 0, 0xd, &regval_d);
-
-	dev_info(plat_data->dev, "%02x %02x %02x",
-		regval_b, regval_c, regval_d);
-	dev_info(plat_data->dev, "---- END ----\n");
-#endif
 
 	dev_info(plat_data->dev, "%s exit\n", __func__);
 }
@@ -542,20 +605,20 @@ static void tas25xx_enable_irq(struct tas25xx_priv *p_tas25xx)
 
 		if (p_tas25xx->irq_enabled[i] == 0) {
 			irq_no = p_tas25xx->devs[i]->irq_no;
-			desc = irq_data_to_desc(irq_get_irq_data(irq_no));
+			desc = irq_to_desc(irq_no);
 			if (desc && desc->depth > 0) {
 				enable_irq(irq_no);
-				dev_info(plat_data->dev, "irq_no=%d(gpio=%d), enabled irq",
+				dev_info(plat_data->dev, "irq_no=%d(gpio=%d), enabled irq\n",
 					irq_no, irq_gpio);
 				p_tas25xx->irq_enabled[i] = 1;
 			} else if (desc) {
 				p_tas25xx->irq_enabled[i] = 1;
-				dev_info(plat_data->dev, "irq_no=%d already enabled", irq_no);
+				dev_info(plat_data->dev, "irq_no=%d already enabled\n", irq_no);
 			} else {
-				dev_info(plat_data->dev, "failed to get descritptor");
+				dev_info(plat_data->dev, "failed to get descriptor\n");
 			}
 		} else {
-			dev_info(plat_data->dev, "GPIO %d, previous IRQ status=%s",
+			dev_info(plat_data->dev, "GPIO %d, previous IRQ status=%s\n",
 			irq_gpio, p_tas25xx->irq_enabled[i] ? "Enabled" : "Disabled");
 		}
 	}
@@ -576,7 +639,7 @@ static void tas25xx_disable_irq(struct tas25xx_priv *p_tas25xx)
 		if (!gpio_is_valid(irq_gpio))
 			continue;
 		if (p_tas25xx->irq_enabled[i] == 1) {
-			dev_info(plat_data->dev, "irq_no=%d(gpio=%d), disabling IRQ", irq_no, irq_gpio);
+			dev_info(plat_data->dev, "irq_no=%d(gpio=%d), disabling IRQ\n", irq_no, irq_gpio);
 			disable_irq_nosync(irq_no);
 			p_tas25xx->irq_enabled[i] = 0;
 		}
@@ -625,15 +688,33 @@ static void init_work_routine(struct work_struct *work)
 		tas25xx_init_work_func(p_tas25xx, dev_tas25xx);
 		ret = tas25xx_update_kcontrol_data(p_tas25xx,
 			KCNTR_POST_POWERUP, 1 << chn);
-		if (ret)
+		if (ret) {
+			set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, chn);
 			dev_err(plat_data->dev,
 				"%s error during post powerup kcontrol update", __func__);
+		}
 	} else {
 		dev_info(plat_data->dev,
 			"skipping init work as the device state was changed");
 	}
 
 	mutex_unlock(&p_tas25xx->codec_lock);
+}
+
+static void bin_reload_work_routine(struct work_struct *work)
+{
+	struct tas25xx_priv *p_tas25xx =
+		container_of(work, struct tas25xx_priv, bin_reload_work.work);
+	struct linux_platform *plat_data = NULL;
+
+	plat_data = (struct linux_platform *) p_tas25xx->platform_data;
+	dev_info(plat_data->dev, "calling tas25xx_deregister_codec");
+
+#if IS_ENABLED(CONFIG_TAS25XX_KCTRL_RELOAD)
+	tas25xx_remove_binfile(p_tas25xx);
+#endif /* CONFIG_TAS25XX_KCTRL_RELOAD */
+	p_tas25xx->is_reload = 1;
+	tas25xx_start_fw_load(p_tas25xx, 3);
 }
 
 static int tas25xx_runtime_suspend(struct tas25xx_priv *p_tas25xx)
@@ -713,7 +794,7 @@ static int tas25xx_pm_resume(struct device *dev)
 	mutex_lock(&p_tas25xx->codec_lock);
 	plat_data->i2c_suspend = false;
 
-	/* Restore all I2C writes happend during supended state */
+	/* Restore all I2C writes happened during suspended state */
 	for (i = 0; i < p_tas25xx->ch_count; i++) {
 		regcache_cache_only(plat_data->regmap[i], false);
 		regcache_sync(plat_data->regmap[i]);
@@ -724,7 +805,6 @@ static int tas25xx_pm_resume(struct device *dev)
 	mutex_unlock(&p_tas25xx->codec_lock);
 	return 0;
 }
-
 
 void schedule_init_work(struct tas25xx_priv *p_tas25xx, int ch)
 {
@@ -739,7 +819,6 @@ void cancel_init_work(struct tas25xx_priv *p_tas25xx, int ch)
 
 	plat_data = (struct linux_platform *) p_tas25xx->platform_data;
 	cancel_delayed_work(&p_tas25xx->devs[ch]->init_work);
-
 }
 
 static int tas25xx_parse_dt(struct device *dev,
@@ -761,6 +840,7 @@ static int tas25xx_parse_dt(struct device *dev,
 			"Looking up %s property in node %s, err=%d\n, using default=%d",
 			"ti,max-channels", np->full_name, rc, MAX_CHANNELS);
 		p_tas25xx->ch_count = MAX_CHANNELS;
+		rc = 0;
 	} else {
 		dev_dbg(plat_data->dev, "ti,max-channels=%d",
 			p_tas25xx->ch_count);
@@ -772,13 +852,29 @@ static int tas25xx_parse_dt(struct device *dev,
 		goto EXIT;
 	}
 
-	/*the device structures array*/
+	rc = of_property_read_u32(np, "ti,nested-irq", &p_tas25xx->nested_irq);
+	if (rc) {
+		dev_err(plat_data->dev,
+			"Looking up %s property in node %s, err=%d\n, using default=%d",
+			"ti,nested-irq", np->full_name, rc, 0);
+		p_tas25xx->nested_irq = 0;
+		rc = 0;
+	} else {
+		dev_dbg(plat_data->dev, "ti,nested-irq=%d",
+			p_tas25xx->nested_irq);
+	}
+
+	/* array of tas device structures */
 	p_tas25xx->devs = kmalloc(p_tas25xx->ch_count * sizeof(struct tas_device *),
 		GFP_KERNEL);
+	if (p_tas25xx->devs == NULL) {
+		rc = -ENOMEM;
+		goto EXIT;
+	}
 	for (i = 0; i < p_tas25xx->ch_count; i++) {
 		p_tas25xx->devs[i] = kmalloc(sizeof(struct tas_device),
 					GFP_KERNEL);
-		if (!p_tas25xx->devs[i]) {
+		if (p_tas25xx->devs[i] == NULL) {
 			rc = -ENOMEM;
 			break;
 		}
@@ -817,7 +913,7 @@ static int tas25xx_parse_dt(struct device *dev,
 			p_tas25xx->devs[i]->mn_addr = -1;
 			rc = 0;
 		} else {
-			dev_info(plat_data->dev, "using %s = 0x%2x\n", buf,
+			dev_info(plat_data->dev, "using %s = 0x%02x\n", buf,
 				p_tas25xx->devs[i]->mn_addr);
 		}
 	}
@@ -825,12 +921,12 @@ static int tas25xx_parse_dt(struct device *dev,
 	if (!irq_gpios)
 		dev_err(plat_data->dev, "IRQ GPIOs not found");
 	else if (CHK_ONE_BIT_SET(irq_gpios))
-		dev_info(plat_data->dev, "Using commong IRQ gpio");
+		dev_info(plat_data->dev, "Using common IRQ gpio");
 
 	if (!reset_gpios)
 		dev_err(plat_data->dev, "Reset GPIOs not found");
 	else if (CHK_ONE_BIT_SET(reset_gpios))
-		dev_info(plat_data->dev, "Using commong reset gpio");
+		dev_info(plat_data->dev, "Using common reset gpio");
 
 EXIT:
 	return rc;
@@ -843,22 +939,35 @@ static int tas25xx_i2c_probe(struct i2c_client *p_client,
 	struct linux_platform *plat_data;
 	int ret = 0;
 	int i = 0;
+	char regmap_name[8] = {0};
+	int errcnt = 0;
 
-	dev_info(&p_client->dev, "Driver Tag: %s, addr=0x%2x\n",
+	dev_info(&p_client->dev, "Driver Tag: %s, addr=0x%02x\n",
 		TAS25XX_DRIVER_TAG, p_client->addr);
 
-	p_tas25xx = devm_kzalloc(&p_client->dev,
-		sizeof(struct tas25xx_priv), GFP_KERNEL);
-	if (p_tas25xx == NULL) {
-		ret = -ENOMEM;
-		goto err;
+	if (!i2c_check_functionality(p_client->adapter, I2C_FUNC_I2C)) {
+		dev_err(&p_client->dev, "I2C check_functionality failed\n");
+		ret = -EIO;
+		goto probe_err;
 	}
 
-	plat_data = (struct linux_platform *)devm_kzalloc(&p_client->dev,
-		sizeof(struct linux_platform), GFP_KERNEL);
+	if (!i2c_client_has_driver(p_client)) {
+		dev_err(&p_client->dev, "I2C client has no driver\n");
+		ret = -EIO;
+		goto probe_err;
+	}
+
+	p_tas25xx = kzalloc(sizeof(struct tas25xx_priv), GFP_KERNEL);
+	if (p_tas25xx == NULL) {
+		ret = -ENOMEM;
+		goto probe_err;
+	}
+
+	plat_data = (struct linux_platform *)
+		kzalloc(sizeof(struct linux_platform), GFP_KERNEL);
 	if (plat_data == NULL) {
 		ret = -ENOMEM;
-		goto err;
+		goto probe_err;
 	}
 
 	p_tas25xx->platform_data = plat_data;
@@ -895,32 +1004,40 @@ static int tas25xx_i2c_probe(struct i2c_client *p_client,
 	plat_data->runtime_resume = tas25xx_runtime_resume;
 #endif
 	p_tas25xx->m_power_state = TAS_POWER_SHUTDOWN;
+	p_tas25xx->ti_amp_state = ti_amp_state;
 
 	if (p_client->dev.of_node) {
 		ret = tas25xx_parse_dt(&p_client->dev, p_tas25xx);
 		if (ret)
-			goto err;
+			goto probe_err;
 	}
 
 	for (i = 0; i < p_tas25xx->ch_count; i++) {
+		ti_amp_state[i] = TAS_AMP_ERR_EINVAL;
+
 		if (gpio_is_valid(p_tas25xx->devs[i]->reset_gpio)) {
 			ret = gpio_request(p_tas25xx->devs[i]->reset_gpio,
 					reset_gpio_label[i]);
 			if (ret) {
 				dev_err(plat_data->dev,
-					"%s: Failed to request gpio %d\n",
+					"%s: Failed to request gpio %d for reset_gpio\n",
 					__func__,
 					p_tas25xx->devs[i]->reset_gpio);
 				ret = -EINVAL;
-				goto err;
+				goto probe_err;
 			} else {
 				/* make the gpio output always one */
 				dev_info(plat_data->dev, "%s setting reset gpio %d always high, default",
 					__func__, p_tas25xx->devs[i]->reset_gpio);
 				gpio_direction_output(p_tas25xx->devs[i]->reset_gpio, 1);
 			}
-
 		}
+
+		if (p_tas25xx->ch_count > 1) {
+			snprintf(regmap_name, 8, "%d", i);
+			tas25xx_i2c_regmap.name = regmap_name;
+		}
+
 		plat_data->regmap[i] = devm_regmap_init_i2c(p_client,
 			&tas25xx_i2c_regmap);
 		if (IS_ERR(plat_data->regmap[i])) {
@@ -928,34 +1045,40 @@ static int tas25xx_i2c_probe(struct i2c_client *p_client,
 			dev_err(&p_client->dev,
 				"Failed to allocate register map: %d channel %d\n",
 				ret, i);
-			goto err;
+			ti_amp_state[i] = TAS_AMP_ERR_I2C;
 		}
 	}
 
-	ret = tas25xx_register_device(p_tas25xx);
-	if (ret)
-		goto err;
+	tas25xx_register_device(p_tas25xx);
 
+	p_tas25xx->amp_i2c_err = 0;
 	ret = 0;
 	for (i = 0; i < p_tas25xx->ch_count; i++) {
-		if (p_tas25xx->devs[i]->mn_addr != -1) {
-			/* all i2c addressess registered must be accessible */
-		ret = p_tas25xx->read(p_tas25xx, i,
-			TAS25XX_REVID_REG, &p_tas25xx->dev_revid);
-		if (!ret) {
-			dev_info(&p_client->dev,
-				"successfully read revid 0x%x\n", p_tas25xx->dev_revid);
+		if (p_tas25xx->devs[i]->mn_addr != -1
+			&& ti_amp_state[i] != TAS_AMP_ERR_I2C) {
+			/* all i2c addresses registered must be accessible */
+			ret = p_tas25xx->read(p_tas25xx, i,
+				TAS25XX_REVID_REG, &p_tas25xx->dev_revid);
+			if (!ret) {
+				dev_info(&p_client->dev,
+					"successfully read revid 0x%x\n", p_tas25xx->dev_revid);
+				ti_amp_state[i] = TAS_AMP_STATE_BOOT_SUCCESS;
 			} else {
 				dev_err(&p_client->dev,
 					"Unable to read rev id, i2c failure\n");
-			break;
+				ti_amp_state[i] = TAS_AMP_ERR_I2C;
+			}
+
+			if (ti_amp_state[i] == TAS_AMP_ERR_I2C)
+				errcnt++;
 		}
-	}
 	}
 
 	/* consider i2c error as fatal */
-	if (ret)
-		goto err;
+	if (errcnt == p_tas25xx->ch_count) {
+		ret = -ENOENT;
+		goto probe_err;
+	}
 
 	init_waitqueue_head(&p_tas25xx->fw_wait);
 
@@ -969,23 +1092,37 @@ static int tas25xx_i2c_probe(struct i2c_client *p_client,
 			init_work_routine);
 	}
 
+	INIT_DELAYED_WORK(&p_tas25xx->bin_reload_work,
+		bin_reload_work_routine);
+
 	mutex_init(&p_tas25xx->codec_lock);
 	ret = tas25xx_register_codec(p_tas25xx);
 	if (ret) {
 		dev_err(plat_data->dev,
 			"register codec failed, %d\n", ret);
-		goto err;
+		goto probe_err;
 	}
 
 	mutex_init(&p_tas25xx->file_lock);
 	ret = tas25xx_register_misc(p_tas25xx);
 	if (ret) {
-		dev_err(plat_data->dev, "register codec failed %d\n",
+		dev_err(plat_data->dev, "register misc device failed %d\n",
 			ret);
-		goto err;
+		ret = 0; /* failure for misc_device for debugging */
+		goto probe_err;
 	}
 
-err:
+probe_err:
+	if (ret) {
+		if (p_tas25xx)
+			for (i = 0; i < p_tas25xx->ch_count; i++)
+				kfree(p_tas25xx->devs[i]);
+
+		kfree(plat_data);
+		kfree(p_tas25xx);
+		p_tas25xx = NULL;
+	}
+
 	return ret;
 }
 
@@ -995,8 +1132,12 @@ static void tas25xx_i2c_remove(struct i2c_client *p_client)
 	struct tas25xx_priv *p_tas25xx = i2c_get_clientdata(p_client);
 	struct linux_platform *plat_data = NULL;
 
+	if (p_tas25xx == NULL)
+		goto remove_err;
+
 	plat_data = (struct linux_platform *) p_tas25xx->platform_data;
-	dev_info(plat_data->dev, "%s\n", __func__);
+	if (plat_data)
+		dev_info(plat_data->dev, "%s\n", __func__);
 
 	/*Cancel all the work routine before exiting*/
 	for (i = 0; i < p_tas25xx->ch_count; i++)
@@ -1021,13 +1162,14 @@ static void tas25xx_i2c_remove(struct i2c_client *p_client)
 		kfree(p_tas25xx->devs[i]);
 	}
 
-	kfree(p_tas25xx->devs);
+remove_err:
+	kfree(plat_data);
+	kfree(p_tas25xx);
 }
 
-
 static const struct i2c_device_id tas25xx_i2c_id[] = {
-	{ "tas25xx", 0},
-	{}
+	{ "tas25xx", 0 },
+	{},
 };
 MODULE_DEVICE_TABLE(i2c, tas25xx_i2c_id);
 

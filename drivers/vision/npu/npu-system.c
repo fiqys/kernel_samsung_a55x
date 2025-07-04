@@ -24,6 +24,7 @@
 //#include <linux/dma-iommu.h>
 #include <linux/smc.h>
 #include <soc/samsung/exynos/exynos-soc.h>
+#include <soc/samsung/exynos/debug-snapshot.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/of_irq.h>
 #include <linux/scatterlist.h>
@@ -1308,6 +1309,10 @@ int npu_system_soc_suspend(struct npu_system *system)
 	return ret;
 }
 
+#if IS_ENABLED(CONFIG_SOC_S5E8845)
+#define NPU_RTOS_LOAD_RETRY_CNT (3)
+#endif
+
 int npu_system_resume(struct npu_system *system)
 {
 	int ret = 0;
@@ -1381,6 +1386,29 @@ int npu_system_resume(struct npu_system *system)
 	set_bit(NPU_SYS_RESUME_INIT_FWBUF, &system->resume_steps);
 
 	if (system->fw_cold_boot) {
+#if IS_ENABLED(CONFIG_SOC_S5E8845)
+		u32 cnt = 0;
+ 		npu_dbg("reset FW mailbox memory : paddr 0x%08llx, vaddr 0x%p, daddr 0x%08llx, size %lu\n",
+ 				fwmbox->paddr, fwmbox->vaddr, fwmbox->daddr, fwmbox->size);
+		for (cnt = 0; cnt < NPU_RTOS_LOAD_RETRY_CNT; cnt++) {
+			memset(fwmbox->vaddr, 0, fwmbox->size);
+
+			ret = npu_firmware_load(system, 0);
+			if (ret && (cnt == NPU_RTOS_LOAD_RETRY_CNT - 1)) {
+				npu_err("fail(%d) in npu_firmware_load\n", ret);
+				probe_err("fail(%d) in npu_firmware_load\n", ret);
+				dbg_snapshot_expire_watchdog();
+				goto p_err;
+			}
+ 
+			if (!ret)
+				break;
+
+			npu_err("fail(%d) in npu_firmware_load, go retry - cnt(%u)\n", ret, cnt);
+			probe_err("fail(%d) in npu_firmware_load, go retry - cnt(%u)\n", ret, cnt);
+			usleep_range(50, 100);
+		}
+#else
 		npu_dbg("reset FW mailbox memory : paddr 0x%08llx, vaddr 0x%p, daddr 0x%08llx, size %lu\n",
 				fwmbox->paddr, fwmbox->vaddr, fwmbox->daddr, fwmbox->size);
 
@@ -1391,6 +1419,7 @@ int npu_system_resume(struct npu_system *system)
 			npu_err("fail(%d) in npu_firmware_load\n", ret);
 			goto p_err;
 		}
+#endif		
 	}
 
 	set_bit(NPU_SYS_RESUME_FW_LOAD, &system->resume_steps);

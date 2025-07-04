@@ -23,11 +23,12 @@
 #include "../sensormanager/shub_sensor_manager.h"
 #include "../comm/shub_iio.h"
 #include "../utility/shub_utility.h"
+#include "../others/shub_hall_ic.h"
 
 #define CAMERA_LUX_ENABLE		-1
 #define CAMERA_LUX_DISABLE		-2
 
-static int init_light_autobrightness_variable(void)
+static int init_light_autobrightness_variable(int type)
 {
 	struct light_autobrightness_data *data = get_sensor(SENSOR_TYPE_LIGHT_AUTOBRIGHTNESS)->data;
 
@@ -36,7 +37,7 @@ static int init_light_autobrightness_variable(void)
 	return 0;
 }
 
-static void parse_dt_light_autobrightness(struct device *dev)
+static void parse_dt_light_autobrightness(struct device *dev, int type)
 {
 	struct light_autobrightness_data *data = get_sensor(SENSOR_TYPE_LIGHT_AUTOBRIGHTNESS)->data;
 	struct device_node *np = dev->of_node;
@@ -100,7 +101,7 @@ static void report_camera_lux_data(int lux)
 			       sensor->report_event_size);
 }
 
-static int sync_light_autobrightness_status(void)
+static int sync_light_autobrightness_status(int type)
 {
 	set_light_ab_camera_hysteresis();
 	return 0;
@@ -130,6 +131,8 @@ static void report_event_light_autobrightness(void)
 	struct light_autobrightness_data *data = get_sensor(SENSOR_TYPE_LIGHT_AUTOBRIGHTNESS)->data;
 	struct light_ab_event *sensor_value =
 	    (struct light_ab_event *)(get_sensor_event(SENSOR_TYPE_LIGHT_AUTOBRIGHTNESS)->value);
+
+	sensor_value->flip_state = (u8)get_hall_ic_filp_state();
 
 	if (!data->camera_lux_en &&
 	    (sensor_value->lux <= data->camera_lux_hysteresis[0]) &&
@@ -165,7 +168,7 @@ static void report_event_light_autobrightness(void)
 	}
 }
 
-static void print_light_autobrightness_debug(void)
+static void print_light_autobrightness_debug(int type)
 {
 	struct shub_sensor *sensor = get_sensor(SENSOR_TYPE_LIGHT_AUTOBRIGHTNESS);
 	struct sensor_event *event = &(sensor->last_event_buffer);
@@ -215,7 +218,7 @@ int init_light_autobrightness(bool en)
 		return 0;
 
 	if (en) {
-		ret = init_default_func(sensor, "auto_brightness", 9, 5, sizeof(struct light_ab_event));
+		ret = init_default_func(sensor, "auto_brightness", 9, 10, sizeof(struct light_ab_event));
 		sensor->data = (void *)&light_autobrightness_data;
 		sensor->funcs = &light_autobrightness_sensor_funcs;
 

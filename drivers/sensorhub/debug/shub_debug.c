@@ -21,6 +21,7 @@
 #include <linux/version.h>
 
 #include "../comm/shub_comm.h"
+#include "../debug/shub_mini_dump.h"
 #include "../sensormanager/shub_sensor.h"
 #include "../sensormanager/shub_sensor_manager.h"
 #include "../sensormanager/shub_sensor_type.h"
@@ -57,6 +58,7 @@ static void check_no_event(void)
 	struct sensor_event *event;
 	bool check_reset = false;
 	char buffer[9] = {0,};
+	struct shub_data_t *data = get_shub_data();
 
 	if (check_noevent_reset_cnt >= 0 && check_noevent_reset_cnt == get_reset_count())
 		check_reset = true;
@@ -69,7 +71,9 @@ static void check_no_event(void)
 			continue;
 
 		event = get_sensor_event(type);
-		if (sensor->report_mode_continuous && sensor->enabled && sensor->max_report_latency == 0 &&
+		if ((sensor->report_mode_continuous ||
+		     (type == SENSOR_TYPE_LIGHT && event->received_timestamp < sensor->enable_timestamp)) &&
+		    sensor->enabled && sensor->max_report_latency == 0 &&
 		    MAX(sensor->enable_timestamp, sensor->change_timestamp) + 5000000000ULL < timestamp &&
 		    event->received_timestamp + 5000000000ULL < timestamp) {
 			shub_infof("sensor(%d) %lld(%lld), cur = %lld en = %lld change = %lld", type, event->received_timestamp,
@@ -82,6 +86,7 @@ static void check_no_event(void)
 			}
 			if (check_reset) {
 				shub_errf("no event, no sensorhub reset");
+				data->kernel_no_event_state |= (1ULL << type);
 				reset_mcu(RESET_TYPE_KERNEL_NO_EVENT);
 				break;
 			}
@@ -102,12 +107,11 @@ static void check_no_event(void)
 static void debug_work_func(struct work_struct *work)
 {
 	int type;
-	uint64_t en_state = 0;
+	uint64_t probe_state[2] = {0, };
+	uint64_t en_state[2] = {0, };
 	struct shub_data_t *data = get_shub_data();
 	struct rtc_time tm;
 	char time_temp[50] = {0, };
-
-	en_state = get_sensors_legacy_enable_state();
 
 	for (type = 0; type < SENSOR_TYPE_MAX; type++) {
 		if (get_sensor_enabled(type))
@@ -120,13 +124,17 @@ static void debug_work_func(struct work_struct *work)
 	snprintf(time_temp, sizeof(time_temp), "%04d/%02d/%02d %02d:%02d:%02d",
 		 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
 
-	shub_infof(" (%s) FW(%d):%u, Sensor state: 0x%llx, En: 0x%llx, Reset cnt: %d[%d : C %u(%u, %u), N %u, %u, %u]"
-		   ", Cal result : [M:%c, P:%c]",
+	get_sensors_legacy_probe_state(probe_state);
+	get_sensors_legacy_enable_state(en_state);
+	shub_infof(" (%s) FW(%d):%u, Sensor state: 0x%llx, 0x%llx, En: 0x%llx, 0x%llx, "
+		   "Reset cnt: %d[%d : C %u(%u, %u), N (%u, %u), T %u, D %u], No event:[K : 0x%llx, H : 0x%llx], "
+		   "Cal result : [M:%c, P:%c]",
 		   time_temp, get_firmware_type(), get_firmware_rev(),
-		   get_sensors_legacy_probe_state(), en_state, data->cnt_reset, data->cnt_shub_reset[RESET_TYPE_MAX],
-		   data->cnt_shub_reset[RESET_TYPE_KERNEL_COM_FAIL], get_cnt_comm_fail(), get_cnt_timeout(),
-		   data->cnt_shub_reset[RESET_TYPE_KERNEL_NO_EVENT], data->cnt_shub_reset[RESET_TYPE_HUB_NO_EVENT],
-		   data->cnt_shub_reset[RESET_TYPE_HUB_REQ_TASK_FAILURE],
+		   probe_state[0], probe_state[1], en_state[0], en_state[1], data->cnt_reset,
+		   data->cnt_shub_reset[RESET_TYPE_MAX], data->cnt_shub_reset[RESET_TYPE_KERNEL_COM_FAIL],
+		   get_cnt_comm_fail(), get_cnt_timeout(), data->cnt_shub_reset[RESET_TYPE_KERNEL_NO_EVENT],
+		   data->cnt_shub_reset[RESET_TYPE_HUB_NO_EVENT], data->cnt_shub_reset[RESET_TYPE_HUB_REQ_TASK_FAILURE],
+		   data->cnt_shub_reset[RESET_TYPE_9900_DUMP], data->kernel_no_event_state, data->hub_no_event_state,
 		   open_cal_result[SENSOR_TYPE_GEOMAGNETIC_FIELD], open_cal_result[SENSOR_TYPE_PRESSURE]);
 
 	if (is_shub_working())
@@ -138,7 +146,7 @@ static void debug_work_func(struct work_struct *work)
 		/* only work for debug level is mid */
 		if (shub_debug_level()) {
 			shub_infof("panic!");
-			shub_infof("mini dump : %s", data->mini_dump);
+			shub_infof("mini dump : %s", get_shub_mini_dump());
 			panic("sensorhub crash error\n");
 
 		} else {
@@ -196,7 +204,11 @@ int shub_debug_level(void)
 	return SEC_DEBUG_LEVEL(kernel);
 #endif
 #else // LSI
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+	return sec_debug_get_force_upload();
+#else
 	return secdbg_mode_enter_upload();
+#endif
 #endif
 }
 

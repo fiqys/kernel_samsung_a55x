@@ -29,9 +29,6 @@
 #include <linux/device.h>
 #include "../../inc/tas25xx.h"
 
-#define CONFIG_TAS25XX_ALGO_STEREO
-#define CONFIG_SET_RE_IN_KERNEL
-
 struct snd_soc_component;
 
 #define CAPI_V2_TAS_TX_ENABLE           0x10012D14
@@ -52,6 +49,9 @@ struct snd_soc_component;
 #define CHANNEL1        2
 
 #define TAS_DSP_SWAP_IDX       3
+
+#define TAS_SA_LIB_VERSION     2
+#define TAS_SA_PARAM_VERSION   7
 
 #define TAS_SA_GET_F0          3810
 #define TAS_SA_GET_Q           3811
@@ -82,7 +82,6 @@ struct snd_soc_component;
 /* New Param ID Added to send IV Width and VBat info to Algo Library */
 #define TAS_SA_IV_WIDTH_VBAT_MON 3840
 
-#define TAS_SA_LE_FLAG_STATS     3850
 #define TAS_SA_SET_SKIN_TEMP    3853
 #define TAS_SA_SET_DRV_OP_MODE  3854
 /*Added for DC Detection*/
@@ -102,6 +101,13 @@ struct snd_soc_component;
 #define TAS_CALC_PARAM_IDX(I, LEN, CH)    ((I) | ((LEN) << 16) | ((CH) << 28))
 #define AFE_SA_IS_SPL_IDX(X)    TAS_SA_IS_SPL_IDX(X)
 
+#define QFORMAT19		19
+#define QFORMAT30		30
+#define QFORMAT27TO19	8
+
+#define TRANSF_USER_TO_IMPED(X, Y) \
+		((X << QFORMAT19) + ((Y << QFORMAT19) / 100))
+
 /*
  * List all the other profiles other than none and calibration.
  */
@@ -118,21 +124,13 @@ bool tas25xx_set_iv_bit_fomat(int iv_data_with, int vbat, int update_now);
 void tas25xx_send_channel_mapping(void);
 void tas25xx_algo_enable_common_controls(int value);
 
-#if IS_ENABLED(CONFIG_TISA_KBIN_INTF)
-void tas25xx_algo_set_active(void);
-void tas25xx_algo_set_inactive(void);
-void tas_smartamp_kbin_deinitalize(void);
-#endif /* CONFIG_TISA_KBIN_INTF */
-
-#if IS_ENABLED(CONFIG_TAS25XX_CALIB_VAL_BIG) || IS_ENABLED(CONFIG_TISA_SYSFS_INTF)
 void tas25xx_send_algo_calibration(void);
-#endif
 
-#if IS_ENABLED(CONFIG_TAS25XX_CALIB_VAL_BIG)
+void tas_get_algo_param_version_info(void);
+
 void tas25xx_algo_add_calib_valid_bigdata(uint8_t channels);
 void tas25xx_algo_remove_calib_valid_bigdata(void);
 void tas25xx_update_big_data(void);
-#endif
 
 int tas25xx_start_algo_processing(int iv_width, int vbat_on);
 int tas25xx_stop_algo_processing(void);

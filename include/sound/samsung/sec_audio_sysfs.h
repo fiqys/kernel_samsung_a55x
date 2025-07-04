@@ -15,6 +15,12 @@ enum amp_id {
 	AMP_ID_MAX,
 };
 
+enum ready_state {
+	NOT_SUPPORT = -1,
+	INIT_FAIL,
+	INIT_SUCCESS
+};
+
 struct sec_audio_sysfs_data {
 	struct class *audio_class;
 	struct device *jack_dev;
@@ -39,6 +45,7 @@ struct sec_audio_sysfs_data {
 	int (*get_amp_excursion_overcount)(enum amp_id);
 	int (*get_amp_curr_temperature)(enum amp_id);
 	int (*set_amp_surface_temperature)(enum amp_id, int);
+	int (*get_amp_ready)(enum amp_id);
 };
 
 struct sec_audio_counts {
@@ -52,6 +59,10 @@ struct sec_audio_count_data {
 	struct sec_audio_counts adsp_sr;
 };
 
+struct sec_audio_ready_data {
+	int amp[AMP_ID_MAX];
+};
+
 #if IS_ENABLED(CONFIG_SND_SOC_SAMSUNG_AUDIO)
 int audio_register_jack_select_cb(int (*set_jack) (int));
 int audio_register_jack_state_cb(int (*jack_status) (void));
@@ -61,6 +72,8 @@ int audio_register_force_enable_antenna_cb(int (*force_enable_antenna) (int));
 int audio_register_antenna_state_cb(int (*antenna_state) (void));
 int audio_register_codec_id_state_cb(int (*codec_id_state) (void));
 void send_codec_i2c_fail_ev(void);
+void send_amp_ready_ev(enum amp_id, enum ready_state);
+enum ready_state get_amp_ready_state(enum amp_id);
 
 /* bigdata */
 int audio_register_temperature_max_cb(int (*temperature_max) (enum amp_id));
@@ -70,6 +83,7 @@ int audio_register_excursion_max_cb(int (*excursion_max) (enum amp_id));
 int audio_register_excursion_overcount_cb(int (*excursion_overcount) (enum amp_id));
 int audio_register_curr_temperature_cb(int (*curr_temperature) (enum amp_id));
 int audio_register_surface_temperature_cb(int (*surface_temperature) (enum amp_id, int temperature));
+int audio_register_ready_cb(int (*ready) (enum amp_id));
 void send_amp_i2c_fail_ev(int amp_id);
 void send_adsp_silent_reset_ev(void);
 #else
@@ -113,6 +127,16 @@ inline void send_codec_i2c_fail_ev(void)
 
 }
 
+inline void send_amp_ready_ev(enum amp_id id, enum ready_state state)
+{
+
+}
+
+inline enum ready_state get_amp_ready_state(enum amp_id id)
+{
+	return NOT_SUPPORT;
+}
+
 inline int audio_register_temperature_max_cb(int (*temperature_max) (enum amp_id))
 {
 	return -EACCES;
@@ -144,6 +168,11 @@ inline int audio_register_curr_temperature_cb(int (*curr_temperature) (enum amp_
 }
 
 inline int audio_register_surface_temperature_cb(int (*surface_temperature) (enum amp_id, int temperature))
+{
+	return -EACCES;
+}
+
+inline int audio_register_ready_cb(int (*ready) (enum amp_id))
 {
 	return -EACCES;
 }

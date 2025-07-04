@@ -66,6 +66,7 @@ static char *WATER_STATE_TO_STR[] = {
 	"3rd_CHECK",
 	"OTG_CHECK",
 	"WAIT_RECHECK",
+	"DP_SUPPORT",
 	"MAX",
 };
 
@@ -83,6 +84,8 @@ static char *WATER_EVENT_TO_STR[] = {
 	"TIMER_EXPIRED",
 	"RECHECK",
 	"VBUS_OR_PDRID_DETECTED",
+	"DP_ATTACH",
+	"DP_DETACH",
 	"MAX",
 };
 #endif
@@ -276,6 +279,16 @@ static void s2mf301_water_set_status(struct s2mf301_water_data *water, int statu
 		schedule_delayed_work(&water->start_10s_work, msecs_to_jiffies(10 * SEC_PER_MSEC));
 	} else if (status == S2M_WATER_STATUS_CHECKING) {
 		s2mf301_info("[WATER] %s, start checking\n", __func__);
+#if IS_ENABLED(CONFIG_S2M_PDIC_DP_SUPPORT)
+	} else if (status == S2M_WATER_STATUS_DP_SUPPORT) {
+		s2mf301_info("[WATER] %s, DP attach\n", __func__);
+		water->water_det_en(water->pmeter, false);
+		water->water_irq_masking(water->pmeter, true, S2MF301_IRQ_TYPE_RR);
+		water->water_irq_masking(water->pmeter, true, S2MF301_IRQ_TYPE_WATER);
+		water->water_irq_masking(water->pmeter, true, S2MF301_IRQ_TYPE_CHANGE);
+		water->pm_enable(water->pmeter, CONTINUOUS_MODE, false, S2MF301_PM_TYPE_GPADC12);
+
+#endif
 	} else
 		s2mf301_info("[WATER] %s, invalid status(%d)\n", __func__, status);
 }
@@ -451,7 +464,7 @@ bool s2mf301_water_state_cc_check(struct s2mf301_water_data *water)
 	int volt[2] = {0, };
 
 	water->water_irq_masking(water->pmeter, true, S2MF301_IRQ_TYPE_WATER);
-
+	
 	s2mf301_set_cc2_pull_down(pdic_data, true); // cc2 pull_down on
 	s2mf301_set_cc_ovp_state(pdic_data, true, false); // cc1 ovp on
 
@@ -463,7 +476,7 @@ bool s2mf301_water_state_cc_check(struct s2mf301_water_data *water)
 	/* Repeat other cc sied */
 	s2mf301_set_cc1_pull_down(pdic_data, true); // cc1 pull_down on
 	s2mf301_set_cc_ovp_state(pdic_data, false, true); // cc2 ovp on
-
+	
 	volt[1] = s2mf301_water_get_vcc2_rr(water);
 
 	s2mf301_set_cc_ovp_state(pdic_data, false, false); // cc2 ovp off
@@ -474,9 +487,14 @@ bool s2mf301_water_state_cc_check(struct s2mf301_water_data *water)
 	pr_info("%s, cc1(%d)mV, cc2(%d)mV\n", __func__, volt[0], volt[1]);
 
 	if (volt[0] >= water->cc_hiccup_th || volt[1] >= water->cc_hiccup_th)
-		return true;
+		return true;	
 	else
 		return false;
+}
+
+static void s2mf301_water_state_dp_support(struct s2mf301_water_data *water)
+{
+	s2mf301_water_set_status(water, S2M_WATER_STATUS_DP_SUPPORT);
 }
 
 static void s2mf301_water_state_dry(struct s2mf301_water_data *water)
@@ -575,6 +593,9 @@ static int s2mf301_water_state_dry_status(struct s2mf301_water_data *water)
 	int volt[2] = {0, };
 	int is_cap_water = false;
 	bool is_water_detected = false;
+#if IS_ENABLED(CONFIG_S2MF301_TYPEC_WATER_DRY_CC_CHECK)
+	int i;
+#endif
 
 	if ((pdic_data->is_manual_cc_open & (1 << CC_OPEN_HICCUP)) != 0) {
 		s2mf301_info("%s, recheck after 10s by CC OPEN\n", __func__);
@@ -653,9 +674,47 @@ static int s2mf301_water_state_dry_status(struct s2mf301_water_data *water)
 	/* check capacitance */
 	is_cap_water = s2mf301_water_check_capacitance(water);
 
-	if ( !(IS_DRY(volt[0]) && IS_DRY(volt[1])) )
+	if ( !(IS_DRY(volt[0]) && IS_DRY(volt[1])) ) {
 		is_water_detected = true;
+		goto out;
+	}
 
+
+#if IS_ENABLED(CONFIG_S2MF301_TYPEC_WATER_DRY_CC_CHECK)
+	s2mf301_usbpd_set_cc_state(pdic_data, CC_STATE_OPEN);
+
+	for (i = 0; i < 3; i++) {
+		int charge_volt[2] = {0, };
+		int discharge_volt[2] = {0, };
+
+		s2mf301_usbpd_cc_cs_control(pdic_data, true);
+		water_sleep(200);
+		charge_volt[0] = s2mf301_water_get_vcc1_rr(water);
+		charge_volt[1] = s2mf301_water_get_vcc2_rr(water);
+
+		s2mf301_usbpd_cc_cs_control(pdic_data, false);
+		pr_info("%s, cc charge_ADC[%d, %d]\n", __func__, charge_volt[0], charge_volt[1]);
+
+		water_sleep(50);
+		discharge_volt[0] = s2mf301_water_get_vcc1_rr(water);
+		discharge_volt[1] = s2mf301_water_get_vcc2_rr(water);
+		pr_info("%s, cc discharge_ADC[%d, %d]\n", __func__, discharge_volt[0], discharge_volt[1]);
+
+		if (IS_DRY(charge_volt[0]) && IS_DRY(charge_volt[1])
+				&& IS_CC_NOT_CAP(discharge_volt[0])
+				&& IS_CC_NOT_CAP(discharge_volt[1])) {
+			pr_info("%s: CC dry", __func__);
+			is_water_detected = false;
+			break;
+		} else {
+			pr_info("%s: CC water, recheck", __func__);
+			is_water_detected = true;
+		}
+	}
+	s2mf301_usbpd_set_cc_state(pdic_data, CC_STATE_RD);
+#endif
+
+out:
 	if (is_water_detected || is_cap_water)
 		water->event = S2M_WATER_EVENT_WATER_DETECTED;
 	else
@@ -874,6 +933,9 @@ static void s2mf301_water_state_transition(struct s2mf301_water_data *water, enu
 	case S2M_WATER_STATE_WAIT_RECHECK:
 		ms = s2mf301_water_state_wait_recheck(water);
 		break;
+	case S2M_WATER_STATE_DP_SUPPORT:
+		s2mf301_water_state_dp_support(water);
+		break;
 	default:
 		break;
 	}
@@ -923,6 +985,11 @@ static void s2mf301_water_state_work(struct work_struct *work)
 		case S2M_WATER_EVENT_ATTACH_AS_SNK:
 			next_state = S2M_WATER_STATE_ATTACHED;
 			break;
+#if IS_ENABLED(CONFIG_S2M_PDIC_DP_SUPPORT)
+		case S2M_WATER_EVENT_DP_ATTACH:
+			next_state = S2M_WATER_STATE_DP_SUPPORT;
+			break;
+#endif
 		case S2M_WATER_EVENT_SBU_CHANGE_INT:
 		default:
 			next_state = S2M_WATER_STATE_1st_CHECK;
@@ -1025,6 +1092,18 @@ static void s2mf301_water_state_work(struct work_struct *work)
 		water_wake_unlock(water->recheck_wake);
 		next_state = S2M_WATER_STATE_2nd_CHECK;
 		break;
+#if IS_ENABLED(CONFIG_S2M_PDIC_DP_SUPPORT)
+	case S2M_WATER_STATE_DP_SUPPORT:
+		switch (event) {
+		case S2M_WATER_EVENT_DP_DETACH:
+			next_state = S2M_WATER_STATE_DRY;
+			break;
+		default:
+			next_state = S2M_WATER_STATE_DP_SUPPORT;
+			break;
+		}
+		break;
+#endif
 	default:
 		skip = true;
 		break;
@@ -1206,6 +1285,7 @@ void s2mf301_water_init(struct s2mf301_water_data *water)
 	water->water_threshold = 780;
 	water->dry_threshold = 1060;
 	water->cap_threshold = 100;
+	water->cc_cap_threshold = 300;
 	water->cc_hiccup_th = 1000;
 	water->water_and_or_sel = 0;
 

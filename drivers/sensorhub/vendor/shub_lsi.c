@@ -1,5 +1,6 @@
 #include "../comm/shub_comm.h"
 #include "../debug/shub_dump.h"
+#include "../debug/shub_mini_dump.h"
 #include "../sensorhub/shub_device.h"
 #include "../utility/shub_utility.h"
 
@@ -70,13 +71,11 @@ static int contexthub_ipc_notifier(struct notifier_block *nb, unsigned long val,
 static int contexthub_dump_notifier(struct notifier_block *nb, unsigned long val, void *data)
 {
 	struct contexthub_dump *dump_data = (struct contexthub_dump *)data;
-	struct shub_data_t *shub_data = get_shub_data();
 
 	shub_dump_write_file(dump_data->dump, dump_data->size, dump_data->reason);
 
 	if (dump_data->reason == CHUB_ERR_FW_FAULT) {
-		memcpy(shub_data->mini_dump, dump_data->mini_dump, MINI_DUMP_LENGTH);
-		shub_info("mini dump : %s", shub_data->mini_dump);
+		shub_write_mini_dump(dump_data->mini_dump, strlen(dump_data->mini_dump));
 	}
 
 	return 0;

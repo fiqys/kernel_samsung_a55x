@@ -2333,6 +2333,10 @@ static int abox_cpu_suspend_complete(struct device *dev)
 
 		if (local_clock() > limit) {
 			abox_err(dev, "%s: timeout\n", __func__);
+			if (data->test_mode == TEST_MODE_SLT) {
+				abox_info(dev, "TEST SLT MODE\n");
+				BUG_ON(1);
+			}
 			ret = -ETIME;
 			break;
 		}
@@ -3580,6 +3584,57 @@ static void abox_cleanup_pcmc(struct abox_data *data)
 	flush_work(&data->pcmc.request_work);
 }
 
+void abox_cleanup_dma(struct abox_data *data)
+{
+	unsigned int val = 0;
+	unsigned int ctrl_val = 0;
+	u64 timeout;
+	int i = 0;
+
+	abox_info(data->dev, "%s\n", __func__);
+
+	/*rdma check*/
+	for(i = 0; i < data->rdma_count; i++) {
+		timeout = local_clock() + abox_get_waiting_ns(false);
+		regmap_read(data->regmap, ABOX_RDMA_STATUS(i), &val);
+		while (!!(val & ABOX_RDMA_PROGRESS_MASK)) {
+			if (local_clock() > timeout) {
+				abox_info(data->dev, "%s(%d) timeout\n", __func__, i);
+				break;
+			}
+
+			regmap_read(data->regmap, ABOX_RDMA_CTRL0(i), &ctrl_val);
+			abox_info(data->dev, "%s rdma(%d):0x%x / 0x%x\n", __func__,
+					i, val, ctrl_val);
+			regmap_update_bits(data->regmap, ABOX_RDMA_CTRL0(i),
+					ABOX_DMA_ENABLE_MASK, 0);
+			regmap_read(data->regmap, ABOX_RDMA_CTRL0(i), &ctrl_val);
+			abox_info(data->dev, "%s d(0x%x)\n", __func__, ctrl_val);
+		}
+	}
+
+	/*wdma check*/
+	for(i = 0; i < data->wdma_count; i++) {
+		timeout = local_clock() + abox_get_waiting_ns(false);
+		regmap_read(data->regmap, ABOX_WDMA_STATUS(i), &val);
+		while (!!(val & ABOX_WDMA_PROGRESS_MASK)) {
+			if (local_clock() > timeout) {
+				abox_info(data->dev, "%s(%d) timeout\n", __func__, i);
+				break;
+			}
+
+			regmap_read(data->regmap, ABOX_WDMA_CTRL0(i), &ctrl_val);
+			abox_info(data->dev, "%s wdma(%d):0x%x / 0x%x\n", __func__,
+					i, val, ctrl_val);
+			regmap_update_bits(data->regmap, ABOX_WDMA_CTRL0(i),
+					ABOX_DMA_ENABLE_MASK, 0);
+			regmap_read(data->regmap, ABOX_WDMA_CTRL0(i), &ctrl_val);
+			abox_info(data->dev, "%s d(0x%x)\n", __func__, ctrl_val);
+		}
+	}
+	abox_info(data->dev, "%s done\n", __func__);
+}
+
 static void abox_early_cleanup(struct abox_data *data)
 {
 	switch (CONFIG_SND_SOC_SAMSUNG_ABOX_VERSION) {
@@ -3594,6 +3649,7 @@ static void abox_early_cleanup(struct abox_data *data)
 	case ABOX_SOC_VERSION(4, 2, 0):
 	case ABOX_SOC_VERSION(4, 0x30, 0):
 		abox_cleanup_qchannel_disable(data, ABOX_CCLK_ACP, true);
+		abox_cleanup_dma(data);
 		break;
 	default:
 		/* ignore */
@@ -4012,6 +4068,7 @@ static ssize_t calliope_cmd_store(struct device *dev,
 	static const char cmd_test_exported_api[] = "TEST EXPORTED API";
 	static const char cmd_load_topology[] = "LOAD TOPOLOGY";
 	static const char cmd_load_calliope[] = "LOAD CALLIOPE";
+	static const char cmd_load_slt[] = "TEST SLT";
 	struct abox_data *data = dev_get_drvdata(dev);
 	char name[80];
 	int ret;
@@ -4075,6 +4132,20 @@ static ssize_t calliope_cmd_store(struct device *dev,
 						0, 0);
 				kfree(msg);
 			}
+		}
+	} else if (!strncmp(cmd_load_slt, buf, sizeof(cmd_load_slt) - 1)) {
+		unsigned int timeout;
+
+		abox_info(dev, "TEST SLT MODE\n");
+
+		ret = kstrtouint(buf + sizeof(cmd_load_slt), 10, &timeout);
+		if (!ret) {
+			abox_info(dev, "suspend time %u\n", timeout);
+			pm_runtime_set_autosuspend_delay(dev, timeout);
+			data->test_mode = TEST_MODE_SLT;
+		} else {
+			pm_runtime_set_autosuspend_delay(dev, 500);
+			data->test_mode = TEST_MODE_NONE;
 		}
 	} else if (!strncmp(cmd_mux_pcmc, buf, sizeof(cmd_mux_pcmc) - 1)) {
 		enum mux_pcmc mux = ABOX_PCMC_OSC;
@@ -4628,6 +4699,8 @@ static int samsung_abox_probe(struct platform_device *pdev)
 	data->probed = true;
 
 	data->rebooting = false;
+
+	data->test_mode = TEST_MODE_NONE;
 
 	pm_runtime_put(dev);
 

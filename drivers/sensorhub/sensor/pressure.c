@@ -25,8 +25,13 @@
 #include <linux/of_gpio.h>
 #include <linux/slab.h>
 
+#ifdef CONFIG_SHUB_TEST_FOR_ONLY_UML
+#define CALIBRATION_FILE_PATH "baro_delta.txt"
+#define SW_OFFSET_FILE_PATH "baro_sw_offset.txt"
+#else
 #define CALIBRATION_FILE_PATH "/efs/FactoryApp/baro_delta"
 #define SW_OFFSET_FILE_PATH "/efs/FactoryApp/baro_sw_offset"
+#endif
 
 get_init_chipset_funcs_ptr get_pressure_funcs_ary[] = {
 	get_pressure_bmp580_function_pointer,
@@ -120,7 +125,7 @@ int save_pressure_sw_offset_file(int offset)
 	return ret;
 }
 
-static void parse_dt_pressure(struct device *dev)
+static void parse_dt_pressure(struct device *dev, int type)
 {
 	struct pressure_data *data = get_sensor(SENSOR_TYPE_PRESSURE)->data;
 	struct device_node *np = dev->of_node;
@@ -153,19 +158,21 @@ static void report_pressure_event(void)
 #endif
 }
 
-void print_pressure_debug(void)
+void print_pressure_debug(int type)
 {
 	struct shub_sensor *sensor = get_sensor(SENSOR_TYPE_PRESSURE);
 	struct sensor_event *event = &(sensor->last_event_buffer);
-	struct pressure_event *sensor_value = (struct pressure_event *)(event->value);
+	struct pressure_event *last_sensor_value = (struct pressure_event *)(event->value);
+	struct pressure_event *sensor_value = (struct pressure_event *)(get_sensor_event(SENSOR_TYPE_PRESSURE)->value);
 	struct pressure_data *data = sensor->data;
 
 	shub_info("%s(%u) : %d, %d, %d, %d, %d (%lld) (%ums, %dms)", sensor->name, SENSOR_TYPE_PRESSURE,
-		  sensor_value->pressure, sensor_value->temperature, sensor_value->pressure_cal, data->sw_offset,
-		  data->convert_coef, event->timestamp, sensor->sampling_period, sensor->max_report_latency);
+		  last_sensor_value->pressure, last_sensor_value->temperature, sensor_value->pressure_cal,
+		  data->sw_offset, data->convert_coef, event->timestamp,
+		  sensor->sampling_period, sensor->max_report_latency);
 }
 
-static int open_pressure_files(void)
+static int open_pressure_files(int type)
 {
 	shub_infof("");
 	open_pressure_calibration_file();

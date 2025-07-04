@@ -1,3 +1,5 @@
+subdir-ccflags-y += -Wno-error
+
 obj-$(CONFIG_SEC_INPUT_BOOSTER)	+= input_booster_lkm.o
 ifdef CONFIG_SEC_INPUT_BOOSTER_MODE
 	input_booster_lkm-$(CONFIG_SEC_INPUT_BOOSTER)	+= evdev_booster.o input_booster_mode.o
@@ -23,4 +25,5 @@ ccflags-y += -I$(srctree)/drivers/misc/mediatek/sched/
 endif
 ifdef CONFIG_MTK_DVFSRC
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat/
+ccflags-y += -I$(DEVICE_MODULES_PATH)/drivers/misc/mediatek/include/mt-plat/
 endif

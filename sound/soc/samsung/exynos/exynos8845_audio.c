@@ -28,6 +28,7 @@
 
 #if IS_ENABLED(CONFIG_SND_SOC_SAMSUNG_AUDIO)
 #include <sound/samsung/sec_audio_sysfs.h>
+#include <sound/samsung/snd_debug_proc.h>
 #endif
 
 #if IS_ENABLED(CONFIG_SEC_ABC)
@@ -50,6 +51,7 @@
 #include "../../codecs/tas25xx/bigdata_tas_sysfs_cb.h"
 #include "../../codecs/tas25xx/algo/platform/exynos/skinprot-sysfs-cb.h"
 #include "../../codecs/tas25xx/inc/tas25xx-regmap.h"
+#include "../../codecs/tas25xx/inc/tas25xx-ext.h"
 #endif
 
 #define ABOX_SOC_VERSION(m, n, r) (((m) << 16) | ((n) << 8) | (r))
@@ -97,6 +99,24 @@ static const struct snd_soc_ops rdma_ops = {
 static const struct snd_soc_ops wdma_ops = {
 };
 
+static int get_audio_amp_ready(enum amp_id id)
+{
+	struct sound_drvdata *drvdata = &exynos_drvdata;
+	int ret = NOT_SUPPORT;
+
+#if IS_ENABLED(CONFIG_SND_SOC_TAS25XX)
+	ret = tas25xx_get_state(id);
+	dev_info(drvdata->dev, "%s: tas25xx_get_state id=%d, ret=%d\n", __func__, id, ret);
+	ret = ret > 0 ? INIT_SUCCESS : INIT_FAIL;
+#else
+#if IS_ENABLED(CONFIG_SND_SOC_SAMSUNG_AUDIO)
+	ret = get_amp_ready_state(id);
+#endif
+#endif
+	/* Implement codes for amp */
+	dev_info(drvdata->dev, "%s: id=%d, ret=%d\n", __func__, id, ret);
+	return ret;
+}
 #if IS_ENABLED(CONFIG_SND_SOC_TAS25XX)
 const int tas_addr[2] = {0x49, 0x48};
 const int tas_addr_len = 2;
@@ -151,49 +171,47 @@ void cirrus_amp_fail_event(const char *suffix)
 
 static int uaif1_init(struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
+	struct snd_soc_card *card = rtd->card;
+	struct snd_soc_dai *dai;
 	struct snd_soc_component *component = NULL;
+	unsigned int num_codecs = rtd->dai_link->num_codecs;
+	int i;
 #if IS_ENABLED(CONFIG_SND_SOC_CS35L45)
 	struct snd_soc_dapm_context *dapm;
 #endif
-#if IS_ENABLED(CONFIG_SND_SOC_CS35L45) || IS_ENABLED(CONFIG_SND_SOC_TAS25XX)
-	struct snd_soc_dai *dai;
-	int i;
-#endif
 
-	if (!codec_dai)
-		return 0;
+	dev_info(card->dev, "%s: num_codecs(%d)\n", __func__, num_codecs);
 
-	component = codec_dai->component;
-	if (!component)
-		return 0;
+	for_each_rtd_codec_dais(rtd, i, dai) {
+		component = dai->component;
+		if (!component)
+			continue;
+
+		dev_info(card->dev, "%s: component[%d]->name=%s\n", __func__, i, component->name);
 #if 0
 #if IS_ENABLED(CONFIG_SND_SOC_SAMSUNG_EXYNOS_TFA9878)
-	if (strstr(component->name, "tfa98xx"))
-		register_tfa98xx_bigdata_cb(component);
+		if (strstr(component->name, "tfa98xx"))
+			register_tfa98xx_bigdata_cb(component);
 #endif
 #endif
 
 #if IS_ENABLED(CONFIG_SND_SOC_TAS25XX)
-	for_each_rtd_codec_dais(rtd, i, dai) {
-		if (strstr(dai->component->name, "tas25xx")) {
+		if (strstr(component->name, "tas25xx")) {
 			register_tas25xx_bigdata_cb(component);
 			register_tas25xx_cb_component(component);
 			tas25xx_register_i2c_error_callback(tas_i2c_fail_log);
 		}
-	}
 #endif
 
 #if IS_ENABLED(CONFIG_SND_SOC_CS35L45)
-	if (strstr(component->name, "cs35l45")) {
-		register_cirrus_bigdata_cb(component);
-		cirrus_amp_register_i2c_error_callback("", cirrus_i2c_fail_log);
-		cirrus_amp_register_i2c_error_callback("_r", cirrus_i2c_fail_log);
-		cirrus_amp_register_error_callback("", cirrus_amp_fail_event);
-		cirrus_amp_register_error_callback("_r", cirrus_amp_fail_event);
+		if (strstr(component->name, "cs35l45")) {
+			register_cirrus_bigdata_cb(component);
+			cirrus_amp_register_i2c_error_callback("", cirrus_i2c_fail_log);
+			cirrus_amp_register_i2c_error_callback("_r", cirrus_i2c_fail_log);
+			cirrus_amp_register_error_callback("", cirrus_amp_fail_event);
+			cirrus_amp_register_error_callback("_r", cirrus_amp_fail_event);
 
-		for_each_rtd_codec_dais(rtd, i, dai) {
-			dapm = snd_soc_component_get_dapm(dai->component);
+			dapm = snd_soc_component_get_dapm(component);
 
 			snd_soc_dapm_ignore_suspend(dapm, "SPK");
 			snd_soc_dapm_ignore_suspend(dapm, "AP");
@@ -202,8 +220,8 @@ static int uaif1_init(struct snd_soc_pcm_runtime *rtd)
 			snd_soc_dapm_ignore_suspend(dapm, "Exit");
 			snd_soc_dapm_sync(dapm);
 		}
-	}
 #endif
+	}
 
 	return 0;
 }
@@ -296,11 +314,23 @@ static int exynos_late_probe(struct snd_soc_card *card)
 	struct device *dev = card->dev;
 	struct snd_soc_pcm_runtime *rtd;
 	struct snd_soc_dai *dai;
-	struct snd_soc_dapm_context *dapm;
+	struct snd_soc_dapm_context *dapm = &card->dapm;
+	struct device_node *np = card->dev->of_node;
 	const char *name;
-	int i;
+	int ret, i;
 
-	dapm = &card->dapm;
+	if (of_property_read_bool(np, "samsung,routing")) {
+		ret = snd_soc_of_parse_audio_routing(card, "samsung,routing");
+		if (ret) {
+			dev_err(dev, "snd_soc_of_parse_audio_routing failed: %d", ret);
+			return ret;
+		}
+		ret = snd_soc_dapm_add_routes(dapm, card->of_dapm_routes,
+						card->num_of_dapm_routes);
+		if (ret < 0)
+			dev_err(dev, "some routes failed to register: %d", ret);
+	}
+
 	snd_soc_dapm_ignore_suspend(dapm, "VOUTPUT");
 	snd_soc_dapm_ignore_suspend(dapm, "VINPUT1");
 	snd_soc_dapm_ignore_suspend(dapm, "VINPUT2");
@@ -1445,6 +1475,65 @@ static struct snd_soc_card exynos_sound = {
 	.num_aux_devs = ARRAY_SIZE(aux_dev),
 };
 
+#if IS_ENABLED(CONFIG_SND_SOC_SAMSUNG_AUDIO)
+static int sec_dai_link_codecs_component(struct device *dev, struct device_node *np,
+		struct snd_soc_dai_link *dai_link)
+{
+	struct of_phandle_args args;
+	struct snd_soc_dai_link_component *component;
+	int index, num_codecs;
+	int ret;
+
+	num_codecs = of_count_phandle_with_args(np, "sound-dai", "#sound-dai-cells");
+
+	dev_info(dev, "%s : num_codecs : %d dai_link_id : %x\n", __func__, num_codecs, dai_link->id);
+
+	if (num_codecs <= 0)
+		return -EINVAL;
+
+	component = devm_kcalloc(dev, num_codecs, sizeof(*component), GFP_KERNEL);
+	if (!component) {
+		dai_link->codecs = NULL;
+		dai_link->num_codecs = 0;
+		return -ENOMEM;
+	}
+	dai_link->codecs = component;
+	dai_link->num_codecs = num_codecs;
+
+	/* checks each codec component in a given DAI link to see if it has been initialized correctly. */
+	for_each_link_codecs(dai_link, index, component) {
+		dev_info(dev, "%s : dai_link %s[%d] Codec Check\n",
+					__func__, dai_link->name, index);
+
+		of_parse_phandle_with_args(np, "sound-dai",
+						 "#sound-dai-cells", index, &args);
+		component->of_node = args.np;
+
+		ret = snd_soc_get_dai_name(&args, &component->dai_name);
+		if (ret < 0) {
+			dev_err(dev, "%s : dai_link %s[%d] component init fail %d\n",
+					__func__, dai_link->name, index, ret);
+			component->name = "snd-soc-dummy";
+			component->dai_name = "snd-soc-dummy-dai";
+			component->of_node = NULL;
+			dev_err(dev, "%s : Dummy Component (%s : %s)\n",
+					__func__, component->name, component->dai_name);
+		} else {
+			dev_info(dev, "%s : dai_link %s[%d] component init success %d\n",
+					__func__, dai_link->name, index, ret);
+			dev_info(dev, "%s :  Normal Component (%s : %s)\n",
+					__func__, component->name, component->dai_name);
+		}
+		sdp_boot_print("%s: %s init %s\n",
+					dai_link->name, component->dai_name, ret ? "FAIL" : "SUCCESS");
+
+		if (dai_link->id == ABOX_UAIF_DAI_ID(0, 1))
+			send_amp_ready_ev(index, ret ? INIT_FAIL : INIT_SUCCESS);
+	}
+	return 0;
+}
+#endif
+
 static int read_platform(struct device_node *np, struct device *dev,
 		struct snd_soc_dai_link *dai_link)
 {
@@ -1529,7 +1618,11 @@ static int read_codec(struct device_node *np, struct device *dev,
 		return 0;
 	}
 
+#if IS_ENABLED(CONFIG_SND_SOC_SAMSUNG_AUDIO)
+	ret = sec_dai_link_codecs_component(dev, np, dai_link);
+#else
 	ret = snd_soc_of_get_dai_link_codecs(dev, np, dai_link);
+#endif
 	of_node_put(np);
 
 	return ret;
@@ -1559,6 +1652,8 @@ static void exynos_register_card_work_func(struct work_struct *work)
 
 	if (ret < 0)
 		dev_err(dev, "sound card register failed: %d\n", ret);
+
+	audio_register_ready_cb(get_audio_amp_ready);
 }
 static DECLARE_WORK(exynos_register_card_work, exynos_register_card_work_func);
 
@@ -1646,12 +1741,6 @@ static int exynos_sound_probe(struct platform_device *pdev)
 
 		link->no_pcm = 1;
 		link->ignore_suspend = 1;
-	}
-
-	if (of_property_read_bool(np, "samsung,routing")) {
-		ret = snd_soc_of_parse_audio_routing(card, "samsung,routing");
-		if (ret)
-			return ret;
 	}
 
 	for (i = 0; i < ARRAY_SIZE(codec_conf); i++) {

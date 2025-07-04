@@ -564,6 +564,12 @@ static const char *extra_string(enum extra event)
 		return "PORT LTM FAIL";
 	case NOTIFY_EXTRA_VIB_FW_LOAD_SUCCESS:
 		return "VIBRATOR FIRMWARE LOAD SUCCESS";
+	case NOTIFY_EXTRA_ENABLE_USB_DATA:
+		return "ENABLE USB DATA";
+	case NOTIFY_EXTRA_DISABLE_USB_DATA:
+		return "DISABLE USB DATA";
+	case NOTIFY_EXTRA_ENABLE_REVERSE_BYPASS:
+		return "ENABLE REVERSE BYPASS";
 	default:
 		return "ETC";
 	}
@@ -981,6 +987,10 @@ static void print_port_string(struct seq_file *m, unsigned long long ts,
 	case NOTIFY_PORT_CLASS_BLOCK:
 		seq_printf(m, "[%5lu.%06lu] block device class %d, interface class %d\n",
 			(unsigned long)ts, rem_nsec / 1000, param1, param2);
+		break;
+	case NOTIFY_PORT_SPEED:
+		seq_printf(m, "[%5lu.%06lu] port speed %s\n",
+			(unsigned long)ts, rem_nsec / 1000, usb_speed_string(param1));
 		break;
 	default:
 		seq_printf(m, "[%5lu.%06lu] undefined event\n",
@@ -1488,6 +1498,8 @@ void state_store_usblog_notify(int type, char *param1)
 	strscpy(buf, param1, sizeof(buf));
 	b = strim(buf);
 	name = strsep(&b, "=");
+	if (!name)
+		goto err;
 
 	index = *(b+USBLOG_CMP_INDEX);
 
@@ -1701,6 +1713,8 @@ void port_store_usblog_notify(int type, void *param1, void *param2)
 	} else if (type == NOTIFY_PORT_DISCONNECT) {
 		pt_buffer->param1 = le16_to_cpu(*(__le16 *)(param1));
 		pt_buffer->param2 = le16_to_cpu(*(__le16 *)(param2));
+	} else if (type == NOTIFY_PORT_SPEED) {
+		pt_buffer->param1 = (uint16_t)(*(enum usb_device_speed *)(param1));
 	} else {
 		pt_buffer->param1 = (uint16_t)(*(__u8 *)(param1));
 		pt_buffer->param2 = (uint16_t)(*(__u8 *)(param2));
@@ -1801,7 +1815,8 @@ void store_usblog_notify(int type, void *param1, void *param2)
 	else if (type == NOTIFY_PORT_CONNECT ||
 				type == NOTIFY_PORT_DISCONNECT ||
 					type == NOTIFY_PORT_CLASS ||
-						type == NOTIFY_PORT_CLASS_BLOCK)
+						type == NOTIFY_PORT_CLASS_BLOCK ||
+							type == NOTIFY_PORT_SPEED)
 		port_store_usblog_notify(type, param1, param2);
 	else if (type == NOTIFY_PCM_PLAYBACK ||
 				type == NOTIFY_PCM_CAPTURE)

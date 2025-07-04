@@ -19,6 +19,8 @@
 #ifndef __TAS25XX_REGBIN_PARSER__
 #define __TAS25XX_REGBIN_PARSER__
 
+#include "tas25xx.h"
+
 #define SampleRate_48000	0
 #define SampleRate_44100	1
 #define SampleRate_96000	2
@@ -58,9 +60,16 @@
 #define TAS25XX_DEFAULT	0xFFFFFFFF
 
 enum kcntl_during_t {
-	KCNTR_ANYTIME = 0, /* instant update */
-	KCNTR_PRE_POWERUP = 1, /* during pre-power up */
-	KCNTR_POST_POWERUP = 2, /* during post-power up */
+	/* set at anytime */
+	KCNTR_ANYTIME = 0x00, /* instant update */
+	/* set at power up */
+	KCNTR_PRE_POWERUP = 0x01, /* during pre-power up */
+	KCNTR_POST_POWERUP = 0x02, /* during post-power up */
+	KCNTR_POWERUP = (KCNTR_PRE_POWERUP | KCNTR_POST_POWERUP), /* during power up */
+	/* restore at power down */
+	KCNTR_PRE_POWERDN = 0x10, /* during pre-power down */
+	KCNTR_POST_POWERDN = 0x20, /* during post-power down */
+	KCNTR_POWERDN = (KCNTR_PRE_POWERDN | KCNTR_POST_POWERDN), /* during power down */
 };
 
 struct default_hw_params {
@@ -98,18 +107,15 @@ int32_t tas25xx_set_init_params(struct tas25xx_priv *p_tas25xx, int32_t ch);
 int32_t tas25xx_set_sample_rate(struct tas25xx_priv *p_tas25xx, int32_t ch, int32_t sample_rate);
 int32_t tas25xx_set_fmt_inv(struct tas25xx_priv *p_tas25xx, int32_t ch, int32_t fmt_inv);
 int32_t tas25xx_set_fmt_mask(struct tas25xx_priv *p_tas25xx, int32_t ch, int32_t fmt_mask);
-int32_t tas25xx_set_rx_slots(struct tas25xx_priv *p_tas25xx, int32_t ch, int32_t rx_slot);
-int32_t tas25xx_set_tx_slots(struct tas25xx_priv *p_tas25xx, int32_t ch, int32_t tx_slot);
-int32_t tas25xx_set_rx_bitwidth(struct tas25xx_priv *p_tas25xx, int32_t ch, int32_t rx_bitwidth);
-int32_t tas25xx_set_rx_slotlen(struct tas25xx_priv *p_tas25xx, int32_t ch, int32_t rx_slotlen);
-int32_t tas25xx_set_tx_slotlen(struct tas25xx_priv *p_tas25xx, int32_t ch, int32_t tx_slotlen);
 int32_t tas25xx_set_pre_powerup(struct tas25xx_priv *p_tas25xx, int32_t ch);
 int32_t tas25xx_set_post_powerup(struct tas25xx_priv *p_tas25xx, int32_t ch);
 int32_t tas25xx_set_pre_powerdown(struct tas25xx_priv *p_tas25xx, int32_t ch);
 int32_t tas25xx_set_post_powerdown(struct tas25xx_priv *p_tas25xx, int32_t ch);
 
 int32_t tas25xx_process_block(struct tas25xx_priv *p_tas25xx, char *mem, int32_t chn);
-
+int32_t tas25xx_process_reg_data(struct tas25xx_priv *p_tas25xx,
+	struct tas25xx_reg_data_t *reg_data, uint32_t chmask);
+int32_t tas25xx_check_for_default_vals(struct tas25xx_priv *p_tas25xx, int *status, int ch);
 int32_t tas25xx_check_if_powered_on(struct tas25xx_priv *p_tas25xx, int *state, int ch);
 int tas_write_init_config_params(struct tas25xx_priv *p_tas25xx, int number_of_channels);
 

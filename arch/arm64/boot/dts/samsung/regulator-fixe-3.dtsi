@@ -5,10 +5,17 @@
 
 &pinctrl_0 {
         ldo_gpio3: ldo_gpio3 {
-                GPIO_CONFIG_PUD(AP,gpa1,gpa1,2, FUNC_OUTPUT_HIGH, PULL_NONE);
+#if 0
+		GPIO_CONFIG_PUD(AP,gpa1,gpa1,2, ${set_gpio_output}, PULL_NONE);
+#else
+		GPIO_CONFIG_PUD(AP,gpa1,gpa1,2, FUNC_OUTPUT_HIGH, PULL_NONE);
+#endif
 #if 0
 		samsung,pin-con-pdn = <3>;
 		samsung,pin-pud-pdn = <0>;
+#endif
+#if 0
+		${input_gpio_properties}
 #endif
         };
 };

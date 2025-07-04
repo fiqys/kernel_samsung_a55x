@@ -448,7 +448,7 @@ enum muic_param_en {
 #define MASK_7b (0x7f)
 #define MASK_8b (0xff)
 
-#define IS_VCHGIN_9V(x) ((8000 <= x) && (x <= 10300))
+#define IS_VCHGIN_9V(x) ((7500 <= x) && (x <= 10300))
 #define IS_VCHGIN_5V(x) ((4000 <= x) && (x <= 6000))
 
 #define AFC_MRXRDY_CNT_LIMIT (3)
@@ -702,6 +702,7 @@ static inline int muic_set_pogo_adc(int adc) {return 0};
 static inline int muic_afc_set_voltage(int voltage) {return 0; }
 static inline int muic_afc_request_voltage(int cause, int voltage);
 static inline int muic_afc_request_cause_clear(void);
+static inline int muic_afc_request_cause_clear_bit(int cause);
 static inline int muic_afc_get_request_cause(void) {return 0;}
 static inline bool muic_is_enable_afc_request(void) {return false;}
 static inline int muic_hv_charger_disable(bool en) {return 0; }

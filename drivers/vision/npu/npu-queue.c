@@ -676,7 +676,8 @@ int npu_queue_alloc(struct npu_queue_list *queue_list, struct vs4l_container_lis
 	struct nq_buffer *temp_buffer_pool;
 
 	if (test_bit(NPU_QUEUE_STATE_ALLOC, &queue_list->state)) {
-		npu_info("inqueue/otqueue is already in alloc state\n");
+		npu_err("inqueue/otqueue is already in alloc state\n");
+		ret = -EINVAL;
 		return ret;
 	}
 

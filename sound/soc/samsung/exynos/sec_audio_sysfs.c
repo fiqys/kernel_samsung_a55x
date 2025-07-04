@@ -146,6 +146,17 @@ static ssize_t audio_amp_##id##_aifecnt_keep_show(struct device *dev, \
 } \
 static DEVICE_ATTR(aifecnt_keep_##id, 0664, \
 			audio_amp_##id##_aifecnt_keep_show, NULL); \
+static ssize_t audio_amp_##id##_ready_show(struct device *dev, \
+	struct device_attribute *attr, char *buf) \
+{ \
+	int report = 0; \
+	if (audio_data->get_amp_ready) \
+		audio_ready->amp[id] = audio_data->get_amp_ready((id)); \
+	report = audio_ready->amp[id]; \
+	return snprintf(buf, PAGE_SIZE, "%d\n", report); \
+} \
+static DEVICE_ATTR(ready_##id, 0664, \
+			audio_amp_##id##_ready_show, NULL); \
 static struct attribute *audio_amp_##id##_attr[] = { \
 	&dev_attr_temperature_max_##id.attr, \
 	&dev_attr_temperature_keep_max_##id.attr, \
@@ -156,12 +167,15 @@ static struct attribute *audio_amp_##id##_attr[] = { \
 	&dev_attr_surface_temperature_##id.attr, \
 	&dev_attr_aifecnt_##id.attr, \
 	&dev_attr_aifecnt_keep_##id.attr, \
+	&dev_attr_ready_##id.attr, \
 	NULL, \
 }
 
 static struct sec_audio_sysfs_data *audio_data;
 
 static struct sec_audio_count_data *audio_count;
+
+static struct sec_audio_ready_data *audio_ready;
 
 int audio_register_jack_select_cb(int (*set_jack) (int))
 {
@@ -442,6 +456,23 @@ static struct attribute_group sec_audio_codec_attr_group = {
 	.attrs = sec_audio_codec_attr,
 };
 
+void send_amp_ready_ev(enum amp_id id, enum ready_state state)
+{
+	if (id < AMP_ID_MAX)
+		audio_ready->amp[id] = state;
+
+	pr_info("%s: amp id %d, state %d\n", __func__, id, state);
+}
+EXPORT_SYMBOL_GPL(send_amp_ready_ev);
+
+enum ready_state get_amp_ready_state(enum amp_id id)
+{
+	if (id < AMP_ID_MAX)
+		return audio_ready->amp[id];
+	return NOT_SUPPORT;
+}
+EXPORT_SYMBOL_GPL(get_amp_ready_state);
+
 /* bigdata */
 int audio_register_temperature_max_cb(int (*temperature_max) (enum amp_id))
 {
@@ -540,6 +571,20 @@ int audio_register_surface_temperature_cb(int (*surface_temperature) (enum amp_i
 	return 0;
 }
 EXPORT_SYMBOL_GPL(audio_register_surface_temperature_cb);
+
+int audio_register_ready_cb(int (*ready) (enum amp_id))
+{
+	if (audio_data->get_amp_ready) {
+		dev_err(audio_data->amp_dev,
+				"%s: Already registered\n", __func__);
+		return -EEXIST;
+	}
+
+	audio_data->get_amp_ready = ready;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(audio_register_ready_cb);
 
 DECLARE_AMP_BIGDATA_SYSFS(0);
 DECLARE_AMP_BIGDATA_SYSFS(1);
@@ -671,6 +716,11 @@ static int sec_audio_sysfs_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
+	if (audio_ready == NULL) {
+		dev_err(&pdev->dev, "%s: no audio_ready\n", __func__);
+		return -ENOMEM;
+	}
+
 	audio_data->no_earjack = of_property_read_bool(np, "audio,no-earjack");
 
 	if (audio_data->no_earjack) {
@@ -683,11 +733,9 @@ static int sec_audio_sysfs_probe(struct platform_device *pdev)
 	}
 
 	of_property_read_u32(np, "audio,num-amp", &audio_data->num_amp);
-	if (audio_data->num_amp >= 0) {
-		for (i = audio_data->num_amp; i < AMP_ID_MAX; i++) {
-			sysfs_remove_group(&audio_data->amp_dev->kobj,
-				&sec_audio_amp_big_data_attr_group[i]);
-		}
+	for (i = audio_data->num_amp; i < AMP_ID_MAX; i++) {
+		sysfs_remove_group(&audio_data->amp_dev->kobj,
+			&sec_audio_amp_big_data_attr_group[i]);
 	}
 
 	return 0;
@@ -742,6 +790,13 @@ static int __init sec_audio_sysfs_init(void)
 		return -ENOMEM;
 	}
 
+	audio_ready = kzalloc(sizeof(struct sec_audio_ready_data), GFP_KERNEL);
+	if (audio_ready == NULL) {
+		kfree(audio_data);
+		kfree(audio_count);
+		return -ENOMEM;
+	}
+
 	audio_data->audio_class = class_create(THIS_MODULE, "audio");
 	if (IS_ERR(audio_data->audio_class)) {
 		pr_err("%s: Failed to create audio class\n", __func__);
@@ -793,6 +848,7 @@ static int __init sec_audio_sysfs_init(void)
 	audio_data->num_amp = 0;
 
 	for (i = 0; i < AMP_ID_MAX; i++) {
+		audio_ready->amp[i] = NOT_SUPPORT;
 		ret = sysfs_create_group(&audio_data->amp_dev->kobj,
 			&sec_audio_amp_big_data_attr_group[i]);
 		if (ret) {
@@ -862,8 +918,10 @@ err_class:
 err_alloc:
 	kfree(audio_data);
 	kfree(audio_count);
+	kfree(audio_ready);
 	audio_data = NULL;
 	audio_count = NULL;
+	audio_ready = NULL;
 
 	return ret;
 }

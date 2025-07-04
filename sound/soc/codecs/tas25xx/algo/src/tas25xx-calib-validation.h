@@ -38,19 +38,12 @@ struct big_data {
 	uint32_t temp_over_count;
 };
 
-struct le_flag_detection_info {
-	u8 le_flag_detected;
-	u32 le_flag_count;
-	u64 le_flag_count_persist;
-};
-
 struct tas25xx_algo {
 	struct class *algo_class;
 	struct device *calib_dev;
 	struct device *valid_dev;
 	struct device *bd_dev;
 	struct big_data b_data[MAX_CHANNELS];
-	struct le_flag_detection_info b_le_flag[MAX_CHANNELS];
 	struct delayed_work calib_work;
 	struct delayed_work valid_work;
 	uint8_t spk_count;
@@ -65,10 +58,10 @@ void tas25xx_algo_remove_calib_valid_bigdata(void);
 struct tas25xx_algo *smartamp_get_sysfs_ptr(void);
 
 /*
- * Q31 to (decimal*100) number conversion
+ * Q30 to (decimal*100) number conversion
  * can be used for excursion
  */
-int32_t tisa_get_q31_to_user(int32_t q31num);
+int32_t tisa_get_q30_to_user(int32_t q30num);
 
 /*
  * Q19 to (decimal*100) number conversion
@@ -82,3 +75,4 @@ int tas_get_coil_temp_nocheck(int id);
 int tas_set_surface_temp_nocheck(int id, int temperature);
 
 #endif /* _TAS25XX_ALGO_H */
+

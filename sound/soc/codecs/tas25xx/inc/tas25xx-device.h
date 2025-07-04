@@ -11,7 +11,7 @@ int tas25xx_tx_set_start_slot(struct tas25xx_priv *p_tas25xx,
 	unsigned int tx_start_slot, int ch);
 int tas25xx_rx_set_edge(struct tas25xx_priv *p_tas25xx,
 	unsigned int rx_edge, int ch);
-int tas25xx_rx_set_bitwidth(struct tas25xx_priv *p_tas25xx,
+int tas25xx_set_rx_bitwidth_for_ch(struct tas25xx_priv *p_tas25xx,
 	int bitwidth, int ch);
 /* Interrupt Related Functions */
 int tas_dev_interrupt_clear(struct tas25xx_priv *p_tas25xx, int ch);

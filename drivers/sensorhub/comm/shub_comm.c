@@ -14,6 +14,7 @@
  */
 
 #include "../debug/shub_debug.h"
+#include "../debug/shub_mini_dump.h"
 #include "../sensor/scontext.h"
 #include "../sensorhub/shub_device.h"
 #include "../sensormanager/shub_sensor.h"
@@ -103,7 +104,7 @@ static void delete_list(struct shub_msg *msg)
 	mutex_unlock(&pending_mutex);
 }
 
-static int comm_to_sensorhub(struct shub_msg *msg)
+static int comm_to_sensorhub(struct shub_msg *msg, bool debug)
 {
 	int ret;
 
@@ -123,8 +124,10 @@ static int comm_to_sensorhub(struct shub_msg *msg)
 		memcpy(&shub_cmd_data[SHUB_MSG_HEADER_SIZE], msg->buffer, msg->length);
 	}
 
-	shub_infof("cmd %d type %d subcmd %d send_buf_len %d ts %llu", msg->cmd, msg->type, msg->subcmd, msg->length,
-		   msg->timestamp);
+	if (debug)
+		shub_infof("cmd %d type %d subcmd %d send_buf_len %d ts %llu", msg->cmd, msg->type, msg->subcmd, msg->length,
+			msg->timestamp);
+	push_last_cmd(msg->cmd, msg->type, msg->subcmd, msg->timestamp);
 
 	ret = sensorhub_comms_write(shub_cmd_data, SHUB_CMD_SIZE);
 	mutex_unlock(&comm_mutex);
@@ -151,7 +154,24 @@ int __mockable shub_send_command(u8 cmd, u8 type, u8 subcmd, char *send_buf, int
 	if (msg == NULL)
 		return -EINVAL;
 
-	ret = comm_to_sensorhub(msg);
+	ret = comm_to_sensorhub(msg, true);
+	if (ret < 0)
+		shub_errf("comm_to_sensorhub FAILED.");
+
+	clean_msg(msg, true);
+
+	return ret;
+}
+
+int __mockable shub_send_command_quitely(u8 cmd, u8 type, u8 subcmd, char *send_buf, int send_buf_len)
+{
+	int ret = 0;
+	struct shub_msg *msg = make_msg(cmd, type, subcmd, send_buf, send_buf_len);
+
+	if (msg == NULL)
+		return -EINVAL;
+
+	ret = comm_to_sensorhub(msg, false);
 	if (ret < 0)
 		shub_errf("comm_to_sensorhub FAILED.");
 
@@ -185,7 +205,7 @@ int __mockable shub_send_command_wait(u8 cmd, u8 type, u8 subcmd, int timeout, c
 	list_add_tail(&msg->list, &pending_list);
 	mutex_unlock(&pending_mutex);
 
-	ret = comm_to_sensorhub(msg);
+	ret = comm_to_sensorhub(msg, true);
 	if (ret < 0) {
 		shub_errf("comm_to_sensorhub FAILED.");
 		delete_list(msg);
@@ -252,6 +272,9 @@ static int parsing_hub_request(int *index, char *dataframe)
 
 	if (req_type == HUB_RESET_REQ_NO_EVENT) {
 		int no_event_type = dataframe[(*index)++];
+		struct shub_data_t *data = get_shub_data();
+
+		data->hub_no_event_state |= (1ULL << no_event_type);
 		shub_infof("Hub request reset[0x%x] No Event type %d", req_type, no_event_type);
 		reset_mcu(RESET_TYPE_HUB_NO_EVENT);
 	} else if (req_type == HUB_RESET_REQ_TASK_FAILURE) {

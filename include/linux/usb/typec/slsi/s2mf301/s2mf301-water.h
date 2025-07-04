@@ -31,6 +31,7 @@
 #endif
 
 #define IS_NOT_CAP(volt)	(volt <= water->cap_threshold)
+#define IS_CC_NOT_CAP(volt)	(volt <= water->cc_cap_threshold)
 #define IS_DRY(volt)		(volt > water->dry_threshold)
 #define IS_WATER(volt)		(volt <= water->water_threshold)
 
@@ -45,6 +46,7 @@ enum s2m_water_status_t {
 	S2M_WATER_STATUS_DRY,
 	S2M_WATER_STATUS_WATER,
 	S2M_WATER_STATUS_CHECKING,
+	S2M_WATER_STATUS_DP_SUPPORT,
 };
 
 enum s2m_water_enable {
@@ -65,6 +67,7 @@ enum s2m_water_state_t {
 	S2M_WATER_STATE_3rd_CHECK,
 	S2M_WATER_STATE_OTG_CHECK,
 	S2M_WATER_STATE_WAIT_RECHECK,
+	S2M_WATER_STATE_DP_SUPPORT,
 	S2M_WATER_STATE_MAX,
 };
 
@@ -81,6 +84,8 @@ enum s2m_water_event_t {
 	S2M_WATER_EVENT_TIMER_EXPIRED,
 	S2M_WATER_EVENT_RECHECK,
 	S2M_WATER_EVENT_VBUS_OR_PDRID_DETECTED,
+	S2M_WATER_EVENT_DP_ATTACH,
+	S2M_WATER_EVENT_DP_DETACH,
 	S2M_WATER_EVENT_MAX,
 };
 
@@ -113,6 +118,7 @@ struct s2mf301_water_data {
 	int water_threshold;
 	int dry_threshold;
 	int cap_threshold;
+	int cc_cap_threshold;
 	int cc_hiccup_th;
 	int water_and_or_sel;
 

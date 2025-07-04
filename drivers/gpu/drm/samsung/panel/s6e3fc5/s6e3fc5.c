@@ -312,6 +312,33 @@ int s6e3fc5_maptbl_getidx_irc_mode(struct maptbl *tbl)
 	return maptbl_index(tbl, 0, !!panel->panel_data.props.irc_mode, 0);
 }
 
+void s6e3fc5_maptbl_copy_elvss_cal(struct maptbl *tbl, u8 *dst)
+{
+	struct panel_device *panel;
+	struct panel_info *panel_data;
+	int ret;
+	u8 elvss_cal_offset_otp_value = 0;
+
+	if (!tbl || !dst)
+		return;
+
+	panel = (struct panel_device *)tbl->pdata;
+	if (unlikely(!panel))
+		return;
+
+	panel_data = &panel->panel_data;
+
+	ret = panel_resource_copy(panel,
+			&elvss_cal_offset_otp_value, "elvss_cal_offset");
+	if (unlikely(ret)) {
+		panel_err("elvss_cal_offset not found in panel resource\n");
+		return;
+	}
+
+	*dst = elvss_cal_offset_otp_value;
+}
+
+
 #if defined(CONFIG_USDM_FACTORY) && defined(CONFIG_USDM_FACTORY_FAST_DISCHARGE)
 int s6e3fc5_maptbl_getidx_fast_discharge(struct maptbl *tbl)
 {
@@ -742,7 +769,8 @@ int s6e3fc5_maptbl_getidx_ffc(struct maptbl *tbl)
 		break;
 	default:
 		panel_err("invalid dsi clock: %d\n", dsi_clk);
-		BUG();
+		idx = S6E3FC5_HS_CLK_1124;
+		break;
 	}
 	return maptbl_index(tbl, 0, idx, 0);
 }
@@ -787,7 +815,7 @@ int s6e3fc5_get_octa_id(struct panel_device *panel, void *buf)
 
 	panel_dbg("<CELL ID>\n");
 	for (i = 0; i < 16; i++) {
-		cell_id[i] = isalnum(octa_id[i + 4]) ? octa_id[i + 4] : '\0';
+		cell_id[i] = is_alphabet_or_num(octa_id[i + 4]) ? octa_id[i + 4] : '\0';
 		panel_dbg("%x -> %c\n", octa_id[i + 4], cell_id[i]);
 		if (cell_id[i] == '\0') {
 			cell_id_exist = false;
@@ -802,7 +830,7 @@ int s6e3fc5_get_octa_id(struct panel_device *panel, void *buf)
 			len += snprintf(buf + len, PAGE_SIZE - len, "%c", cell_id[i]);
 	}
 	len += snprintf(buf + len, PAGE_SIZE - len, "\n");
-	return 0;
+	return len;
 
 }
 
@@ -859,6 +887,8 @@ struct pnobj_func s6e3fc5_function_table[MAX_S6E3FC5_FUNCTION] = {
 	[S6E3FC5_MAPTBL_GETIDX_FFC] = __PNOBJ_FUNC_INITIALIZER(S6E3FC5_MAPTBL_GETIDX_FFC, s6e3fc5_maptbl_getidx_ffc),
 	[S6E3FC5_MAPTBL_INIT_ANALOG_GAMMA] = __PNOBJ_FUNC_INITIALIZER(S6E3FC5_MAPTBL_INIT_ANALOG_GAMMA, s6e3fc5_maptbl_init_analog_gamma),
 	[S6E3FC5_MAPTBL_GETIDX_IRC_MODE] = __PNOBJ_FUNC_INITIALIZER(S6E3FC5_MAPTBL_GETIDX_IRC_MODE, s6e3fc5_maptbl_getidx_irc_mode),
+	[S6E3FC5_MAPTBL_COPY_ELVSS_CAL] = __PNOBJ_FUNC_INITIALIZER(S6E3FC5_MAPTBL_COPY_ELVSS_CAL, s6e3fc5_maptbl_copy_elvss_cal),
+
 };
 
 int s6e3fc5_init(struct common_panel_info *cpi)

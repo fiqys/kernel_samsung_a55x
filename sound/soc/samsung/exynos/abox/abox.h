@@ -368,6 +368,11 @@ enum debug_mode {
 	DEBUG_MODE_COUNT,
 };
 
+enum test_mode {
+	TEST_MODE_NONE,
+	TEST_MODE_SLT,
+};
+
 enum offset_mask { OFFSET, MASK, OFFSET_MASK };
 
 struct abox_ipc {
@@ -559,6 +564,7 @@ struct abox_data {
 	bool restored;
 	bool no_profiling;
 	enum debug_mode debug_mode;
+	enum test_mode test_mode;
 	bool vss_disabled;
 	bool system_state[SYSTEM_STATE_COUNT];
 	bool sifs_cnt_dirty[SET_SIFM0_RATE - SET_SIFS0_RATE];

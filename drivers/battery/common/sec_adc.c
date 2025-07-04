@@ -42,6 +42,8 @@ static struct adc_list batt_adc_list[SEC_BAT_ADC_CHANNEL_NUM] = {
 	{.name = "adc-usb-temp"},
 	{.name = "adc-sub-bat"},
 	{.name = "adc-blkt-temp"},
+	{.name = "adc-dc-temp"},
+	{.name = "adc-3rd-bat"},
 };
 
 static int adc_init_count;
@@ -96,8 +98,8 @@ int adc_read_type(struct device *dev, int channel, int batt_adc_type)
 		batt_adc_list[channel].prev_value = adc;
 	}
 
-	pr_debug("%s: [%d] ADC (type:%s) = %d\n", __func__, channel,
-		(batt_adc_type ? "raw" : "proc."), adc);
+	pr_debug("%s: [%d] ADC (type:%s) = %d. ret(%d)\n", __func__, channel,
+		(batt_adc_type ? "raw" : "proc."), adc, ret);
 
 	return adc;
 }

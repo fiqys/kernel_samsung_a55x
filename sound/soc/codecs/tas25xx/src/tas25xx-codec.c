@@ -43,47 +43,55 @@
 #include <linux/version.h>
 
 #include "../inc/tas25xx.h"
+#include "../inc/tas25xx-ext.h"
 #include "../inc/tas25xx-device.h"
 #include "../inc/tas25xx-logic.h"
+#include "../inc/tas25xx-codec.h"
 #include "../inc/tas25xx-regmap.h"
 #include "../inc/tas25xx-regbin-parser.h"
-#if IS_ENABLED(CONFIG_TAS25XX_ALGO)
 #include "../algo/inc/tas_smart_amp_v2.h"
 #include "../algo/inc/tas25xx-calib.h"
-#endif /*CONFIG_TAS25XX_ALGO*/
 
-static const char *irq_gpio_label[2] = {
-	"TAS25XX-IRQ", "TAS25XX-IRQ2"
+#define TAS25XX_FW_UPDATE_SUCCESS 1
+
+static const char *irq_gpio_label[MAX_CHANNELS] = {
+	"TAS25XX-IRQ", "TAS25XX-IRQ2", "TAS25XX-IRQ3", "TAS25XX-IRQ4"
 };
 
 static struct tas25xx_priv *s_tas25xx;
 
-int tas25xx_start_fw_load(struct tas25xx_priv *p_tas25xx, int retry_count);
+static bool fw_not_valid(struct tas25xx_priv *p_tas25xx);
+static bool fw_load_required(struct tas25xx_priv *p_tas25xx);
 
 static unsigned int tas25xx_codec_read(struct snd_soc_component *codec,
-		unsigned int reg)
+	unsigned int reg)
 {
-	unsigned int value = 0;
+	unsigned int value = 0, dev_reg;
 	struct tas25xx_priv *p_tas25xx = snd_soc_component_get_drvdata(codec);
-	int ret = -1;
+	int ret = -1, channel;
 	struct linux_platform *plat_data =
 		(struct linux_platform *) p_tas25xx->platform_data;
 
 	switch (reg) {
 	case TAS25XX_SWITCH:
-		dev_dbg(plat_data->dev, "%s: %d, %d TAS25XX_SWITCH",
-			__func__, reg, value);
+		dev_dbg(plat_data->dev, "%s: reg=0x%08x TAS25XX_SWITCH\n",
+			__func__, reg);
 		value = p_tas25xx->device_used;
 		break;
 
 	default:
-		dev_dbg(plat_data->dev, "%s: %d, %d default read",
-		__func__, reg, value);
-		ret = p_tas25xx->read(p_tas25xx, 0, reg, &value);
+		dev_reg = reg & 0xffffff;
+		channel = (reg >> 24) & 0x3;
+		if (channel >= p_tas25xx->ch_count)
+			return -EINVAL;
+		dev_dbg(plat_data->dev, "%s: ch=%d dev_reg=0x%06x, default read\n",
+			__func__, channel, dev_reg);
+		ret = p_tas25xx->read(p_tas25xx, channel, dev_reg, &value);
 		break;
 	}
 
-	dev_dbg(plat_data->dev, "%s, reg=%d, value=%d", __func__, reg, value);
+	dev_dbg(plat_data->dev, "%s, reg=0x%08x, value=0x%x\n",
+		__func__, reg, value);
 
 	if (ret == 0)
 		return value;
@@ -91,9 +99,8 @@ static unsigned int tas25xx_codec_read(struct snd_soc_component *codec,
 		return ret;
 }
 
-
 static int tas25xx_codec_write(struct snd_soc_component *codec,
-				unsigned int reg, unsigned int value)
+	unsigned int reg, unsigned int value)
 {
 	struct tas25xx_priv *p_tas25xx = snd_soc_component_get_drvdata(codec);
 	struct linux_platform *plat_data =
@@ -102,21 +109,20 @@ static int tas25xx_codec_write(struct snd_soc_component *codec,
 
 	switch (reg) {
 	case TAS25XX_SWITCH:
-		dev_dbg(plat_data->dev, "%s: %d, %d TAS25XX_SWITCH",
+		dev_dbg(plat_data->dev, "%s: reg=0x%08x, value=0x%x TAS25XX_SWITCH\n",
 			__func__, reg, value);
 		p_tas25xx->device_used = value;
 		break;
 
 	default:
 		ret = -EINVAL;
-		dev_dbg(plat_data->dev, "%s: %d, %d UNIMPLEMENTED",
-		__func__, reg, value);
+		dev_err(plat_data->dev, "%s: reg=0x%08x, value=0x%x UNIMPLEMENTED\n",
+			__func__, reg, value);
 		break;
 	}
 
 	return ret;
 }
-
 
 #if IS_ENABLED(CODEC_PM)
 static int tas25xx_codec_suspend(struct snd_soc_component *codec)
@@ -150,11 +156,10 @@ static int tas25xx_codec_resume(struct snd_soc_component *codec)
 	mutex_unlock(&p_tas25xx->codec_lock);
 	return ret;
 }
-
 #endif
 
 static int tas25xx_dac_event(struct snd_soc_dapm_widget *w,
-			struct snd_kcontrol *kcontrol, int event)
+	struct snd_kcontrol *kcontrol, int event)
 {
 	struct snd_soc_component *codec = snd_soc_dapm_to_component(w->dapm);
 	struct tas25xx_priv *p_tas25xx = snd_soc_component_get_drvdata(codec);
@@ -162,11 +167,20 @@ static int tas25xx_dac_event(struct snd_soc_dapm_widget *w,
 		(struct linux_platform *) p_tas25xx->platform_data;
 	int ret = -1;
 
+	if (fw_not_valid(p_tas25xx) || fw_load_required(p_tas25xx)) {
+		dev_err(plat_data->dev, "%s fw err\n", __func__);
+		return -EINVAL;
+	}
+
 	mutex_lock(&p_tas25xx->codec_lock);
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
 		p_tas25xx->dac_power = 1;
 		dev_info(plat_data->dev, "SND_SOC_DAPM_POST_PMU\n");
+		dev_info(plat_data->dev, "%s, suspend processing power_ctl\n", __func__);
+		p_tas25xx->power_ctl_suspended = 1;
+		memset(p_tas25xx->power_ctl_data, 0,
+			sizeof(struct tas25xx_reg_data_t) * MAX_CHANNELS);
 		ret = tas25xx_set_power_state(p_tas25xx, TAS_POWER_ACTIVE, 0xffff);
 		break;
 
@@ -209,95 +223,89 @@ static const struct snd_soc_dapm_route tas25xx_audio_map[] = {
 	{"Current Sense", NULL, "IMON"},
 };
 
-static bool fw_load_required(struct tas25xx_priv *p_tas25xx)
+bool fw_not_valid(struct tas25xx_priv *p_tas25xx)
+{
+	return (atomic_read(&p_tas25xx->fw_state) == TAS25XX_DSP_FW_PARSE_FAIL);
+}
+
+bool fw_load_required(struct tas25xx_priv *p_tas25xx)
 {
 	return (atomic_read(&p_tas25xx->fw_state) == TAS25XX_DSP_FW_LOAD_FAIL);
 }
 
 static int tas25xx_hw_params(struct snd_pcm_substream *substream,
-		struct snd_pcm_hw_params *params,
-		struct snd_soc_dai *dai)
+	struct snd_pcm_hw_params *params,
+	struct snd_soc_dai *dai)
 {
-	int i;
+	int i, ret = 0;
 	struct snd_soc_component *codec = dai->component;
 	struct tas25xx_priv *p_tas25xx
-			= snd_soc_component_get_drvdata(codec);
+		= snd_soc_component_get_drvdata(codec);
 	struct linux_platform *plat_data =
 		(struct linux_platform *) p_tas25xx->platform_data;
 	int bitwidth = 16;
-	int ret = -EINVAL;
 	unsigned int channels = params_channels(params);
 
 	if (fw_load_required(p_tas25xx)) {
-		dev_warn(plat_data->dev, "%s, firmware is not loaded, retry", __func__);
+		dev_warn(plat_data->dev, "%s, firmware is not loaded, retry\n", __func__);
 		ret = tas25xx_start_fw_load(p_tas25xx, 3);
 		if (ret < 0) {
-			dev_err(plat_data->dev, "%s fw load failed", __func__);
+			dev_err(plat_data->dev, "%s fw load failed\n", __func__);
 			return ret;
 		}
+	}
+
+	if (fw_not_valid(p_tas25xx)) {
+		dev_err(plat_data->dev, "%s, firmware not valid\n", __func__);
+		return -EINVAL;
 	}
 
 	mutex_lock(&p_tas25xx->codec_lock);
 
 	dev_dbg(plat_data->dev, "%s, stream %s format: %d\n", __func__,
-		(substream->stream ==
-			SNDRV_PCM_STREAM_PLAYBACK) ? ("Playback") : ("Capture"),
-		params_format(params));
+		(substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		? ("Playback") : ("Capture"), params_format(params));
 
-	if (channels > 2) {
-		/* assume TDM mode */
-		p_tas25xx->mn_fmt_mode = 2;
+	if (substream->stream != SNDRV_PCM_STREAM_PLAYBACK)
+		p_tas25xx->tx_ch_count = channels;
 
-		switch (params_format(params)) {
-		case SNDRV_PCM_FORMAT_S16_LE:
-			bitwidth = 16;
-			break;
-		case SNDRV_PCM_FORMAT_S24_LE:
-			bitwidth = 24;
-			break;
-		case SNDRV_PCM_FORMAT_S32_LE:
-			bitwidth = 32;
-			break;
-		}
+	switch (params_format(params)) {
+	case SNDRV_PCM_FORMAT_S16_LE:
+		bitwidth = 16;
+		break;
+	case SNDRV_PCM_FORMAT_S24_LE:
+		bitwidth = 24;
+		break;
+	case SNDRV_PCM_FORMAT_S32_LE:
+	default:
+		bitwidth = 32;
+		break;
+	}
 
-		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-			ret = tas25xx_set_tdm_rx_slot(p_tas25xx, channels,
-				bitwidth);
-		else /*Assumed Capture*/
-			ret = tas25xx_set_tdm_tx_slot(p_tas25xx, channels,
-				bitwidth);
-	} else {
-		/* assume I2S mode*/
-		p_tas25xx->mn_fmt_mode = 1;
-		switch (params_format(params)) {
-		case SNDRV_PCM_FORMAT_S16_LE:
-			bitwidth = 16;
-			break;
-		case SNDRV_PCM_FORMAT_S24_LE:
-			bitwidth = 24;
-			break;
-		case SNDRV_PCM_FORMAT_S32_LE:
-			bitwidth = 32;
-			break;
-		}
-
-		ret = tas25xx_set_bitwidth(p_tas25xx,
-				bitwidth, substream->stream);
-		if (ret < 0) {
-			dev_info(plat_data->dev, "set bitwidth failed, %d\n",
-				ret);
-			goto ret;
-		}
+	ret = tas25xx_set_bitwidth(p_tas25xx, bitwidth, substream->stream);
+	if (ret < 0) {
+		dev_info(plat_data->dev, "set bitwidth failed, %d\n", ret);
+		goto ret;
 	}
 
 	dev_info(plat_data->dev, "%s, stream %s sample rate: %d\n", __func__,
-		(substream->stream ==
-			SNDRV_PCM_STREAM_PLAYBACK) ? ("Playback") : ("Capture"),
-		params_rate(params));
+		(substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		? ("Playback") : ("Capture"), params_rate(params));
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		for (i = 0; i < p_tas25xx->ch_count; i++)
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		for (i = 0; i < p_tas25xx->ch_count; i++) {
+			if (is_error_on_ch(p_tas25xx->amp_i2c_err, i))
+				continue;
 			ret = tas25xx_set_sample_rate(p_tas25xx, i, params_rate(params));
+			if (ret)
+				set_ch_ignore(p_tas25xx->amp_i2c_err, i);
+		}
+	}
+
+	if (is_err_on_all_ch(p_tas25xx->amp_i2c_err, p_tas25xx->ch_count)) {
+		tas25xx_log_i2cerr_stats(p_tas25xx);
+		ret = -EIO;
+	}
 
 ret:
 	mutex_unlock(&p_tas25xx->codec_lock);
@@ -306,64 +314,70 @@ ret:
 
 static int tas25xx_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 {
+	int ret = 0;
 	struct snd_soc_component *codec = dai->component;
 	struct tas25xx_priv *p_tas25xx = snd_soc_component_get_drvdata(codec);
 	struct linux_platform *plat_data =
 		(struct linux_platform *) p_tas25xx->platform_data;
-	int ret = -EINVAL;
 
 	if (fw_load_required(p_tas25xx)) {
-		dev_warn(plat_data->dev, "%s, firmware is not loaded, retry", __func__);
+		dev_warn(plat_data->dev, "%s, firmware is not loaded, retry\n", __func__);
 		ret = tas25xx_start_fw_load(p_tas25xx, 3);
 		if (ret < 0) {
-			dev_err(plat_data->dev, "%s fw load failed", __func__);
+			dev_err(plat_data->dev, "%s fw load failed\n", __func__);
 			return ret;
 		}
+	}
+
+	if (fw_not_valid(p_tas25xx)) {
+		dev_err(plat_data->dev, "%s, firmware not valid\n", __func__);
+		return -EINVAL;
 	}
 
 	dev_info(plat_data->dev, "%s, format=0x%x\n", __func__, fmt);
 
 	p_tas25xx->mn_fmt = fmt;
-	ret = tas25xx_set_dai_fmt_for_fmt(p_tas25xx, fmt);
+	ret = tas25xx_set_dai_fmt_for_fmt(p_tas25xx, fmt, 0xffff);
+
+	if (is_err_on_all_ch(p_tas25xx->amp_i2c_err, p_tas25xx->ch_count)) {
+		tas25xx_log_i2cerr_stats(p_tas25xx);
+		ret = -EIO;
+	}
 
 	return ret;
 }
 
 static int tas25xx_set_dai_tdm_slot(struct snd_soc_dai *dai,
-		unsigned int tx_mask, unsigned int rx_mask,
-		int slots, int slot_width)
+	unsigned int tx_mask, unsigned int rx_mask,
+	int slots, int slot_width)
 {
-	int ret = -EINVAL;
+	int ret = 0;
 	struct snd_soc_component *codec = dai->component;
 	struct tas25xx_priv *p_tas25xx = snd_soc_component_get_drvdata(codec);
 	struct linux_platform *plat_data =
 		(struct linux_platform *) p_tas25xx->platform_data;
 
 	if (fw_load_required(p_tas25xx)) {
-		dev_warn(plat_data->dev, "%s, firmware is not loaded, retry", __func__);
+		dev_warn(plat_data->dev, "%s, firmware is not loaded, retry\n", __func__);
 		ret = tas25xx_start_fw_load(p_tas25xx, 3);
 		if (ret < 0) {
-			dev_err(plat_data->dev, "%s fw load failed", __func__);
+			dev_err(plat_data->dev, "%s fw load failed\n", __func__);
 			return ret;
 		}
 	}
 
-	dev_dbg(plat_data->dev, "%s, tx_mask:%d, rx_mask:%d",
+	if (fw_not_valid(p_tas25xx)) {
+		dev_err(plat_data->dev, "%s, firmware not valid\n", __func__);
+		return -EINVAL;
+	}
+
+	dev_dbg(plat_data->dev, "%s, tx_mask:%d, rx_mask:%d\n",
 		__func__, tx_mask, rx_mask);
-	dev_dbg(plat_data->dev, "%s, slots:%d,slot_width:%d",
+	dev_dbg(plat_data->dev, "%s, slots:%d,slot_width:%d\n",
 		__func__, slots, slot_width);
 
-	if (rx_mask) {
-		p_tas25xx->mn_fmt_mode = 2; /*TDM Mode*/
-		ret = tas25xx_set_tdm_rx_slot(p_tas25xx, slots, slot_width);
-	} else if (tx_mask) {
-		p_tas25xx->mn_fmt_mode = 2;
-		ret = tas25xx_set_tdm_tx_slot(p_tas25xx, slots, slot_width);
-	} else {
-		dev_err(plat_data->dev, "%s, Invalid Mask",
-				__func__);
-		p_tas25xx->mn_fmt_mode = 0;
-	}
+	p_tas25xx->slot_width = slot_width;
+	p_tas25xx->mn_slots = slots;
 
 	return ret;
 }
@@ -377,15 +391,20 @@ static int tas25xx_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
 		(struct linux_platform *) p_tas25xx->platform_data;
 
 	if (fw_load_required(p_tas25xx)) {
-		dev_warn(plat_data->dev, "%s, firmware is not loaded, retry", __func__);
+		dev_warn(plat_data->dev, "%s, firmware is not loaded, retry\n", __func__);
 		ret = tas25xx_start_fw_load(p_tas25xx, 3);
 		if (ret < 0) {
-			dev_err(plat_data->dev, "%s fw load failed", __func__);
+			dev_err(plat_data->dev, "%s fw load failed\n", __func__);
 			return ret;
 		}
 	}
 
-	dev_dbg(plat_data->dev, "%s, stream %s mute %d\n", __func__,
+	if (fw_not_valid(p_tas25xx)) {
+		dev_err(plat_data->dev, "%s, firmware not valid\n", __func__);
+		return -EINVAL;
+	}
+
+	dev_info(plat_data->dev, "%s, stream %s mute %d\n", __func__,
 		(stream == SNDRV_PCM_STREAM_PLAYBACK) ? ("Playback") : ("Capture"),
 		mute);
 
@@ -401,21 +420,21 @@ static int tas25xx_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
 	*/
 
 	if (mute) {
-#if IS_ENABLED(CONFIG_TAS25XX_ALGO)
 		tas25xx_stop_algo_processing();
-#endif /* CONFIG_TAS25XX_ALGO */
 
-#if IS_ENABLED(CONFIG_TAS25XX_IRQ_BD)
 		tas25xx_log_interrupt_stats(p_tas25xx);
-#endif /* CONFIG_TAS25XX_IRQ_BD */
+		tas25xx_log_i2cerr_stats(p_tas25xx);
 	} else {
-#if IS_ENABLED(CONFIG_TAS25XX_ALGO)
 		tas25xx_start_algo_processing(p_tas25xx->curr_mn_iv_width,
 			p_tas25xx->curr_mn_vbat);
-#endif /* CONFIG_TAS25XX_ALGO */
-#if IS_ENABLED(CONFIG_TAS25XX_IRQ_BD)
+		if (p_tas25xx->dac_power == 1
+			&& p_tas25xx->power_ctl_suspended > 0) {
+			dev_info(plat_data->dev, "%s, process suspended power_ctl\n", __func__);
+			ret = tas25xx_process_reg_data(p_tas25xx,
+				p_tas25xx->power_ctl_data, 0xffff);
+			p_tas25xx->power_ctl_suspended = 0;
+		}
 		tas25xx_clear_interrupt_stats(p_tas25xx);
-#endif /* CONFIG_TAS25XX_IRQ_BD */
 	}
 
 	return ret;
@@ -470,12 +489,12 @@ static irqreturn_t tas25xx_irq_handler(int irq, void *dev_id)
 
 static int tas25xx_setup_irq(struct tas25xx_priv *p_tas25xx)
 {
-	int i, ret = -EINVAL;
+	int i, ret = 0;
 	struct linux_platform *plat_data =
 		(struct linux_platform *) p_tas25xx->platform_data;
 
 	if (!plat_data)
-		return ret;
+		return -EINVAL;
 
 	/* register for interrupts */
 	for (i = 0; i < p_tas25xx->ch_count; i++) {
@@ -497,15 +516,22 @@ static int tas25xx_setup_irq(struct tas25xx_priv *p_tas25xx)
 			dev_info(plat_data->dev, "irq = %d\n",
 				p_tas25xx->devs[i]->irq_no);
 
-			ret = devm_request_threaded_irq(plat_data->dev,
-					p_tas25xx->devs[i]->irq_no, tas25xx_irq_handler, NULL,
-					IRQF_TRIGGER_FALLING | IRQF_ONESHOT | IRQF_SHARED,
-					"tas25xx", p_tas25xx);
+			if (p_tas25xx->nested_irq) {
+				ret = devm_request_threaded_irq(plat_data->dev,
+						p_tas25xx->devs[i]->irq_no, NULL, tas25xx_irq_handler,
+						IRQF_TRIGGER_FALLING | IRQF_ONESHOT | IRQF_SHARED,
+						"tas25xx", p_tas25xx);
+			} else {
+				ret = devm_request_threaded_irq(plat_data->dev,
+						p_tas25xx->devs[i]->irq_no, tas25xx_irq_handler, NULL,
+						IRQF_TRIGGER_FALLING | IRQF_ONESHOT | IRQF_SHARED,
+						"tas25xx", p_tas25xx);
+			}
 			if (ret) {
 				dev_err(plat_data->dev, "request_irq failed, error=%d\n", ret);
 			} else {
 				p_tas25xx->irq_enabled[i] = 1;
-				dev_info(plat_data->dev, "Interrupt registration successful!!!");
+				dev_info(plat_data->dev, "Interrupt registration successful!!!\n");
 			}
 		}
 	}
@@ -515,36 +541,42 @@ static int tas25xx_setup_irq(struct tas25xx_priv *p_tas25xx)
 
 static int init_dev_with_fw_data(struct tas25xx_priv *p_tas25xx)
 {
-	int ret, i;
+	int ret, i, ch_count;
 	struct linux_platform *plat_data = NULL;
 
 	plat_data = (struct linux_platform *) p_tas25xx->platform_data;
+	ch_count = p_tas25xx->ch_count;
 
 	/* software reset and initial writes */
-	for (i = 0; i < p_tas25xx->ch_count; i++) {
+	for (i = 0; i < ch_count; i++) {
+		if (is_error_on_ch(p_tas25xx->amp_i2c_err, i))
+			continue;
+
 		ret = tas25xx_software_reset(p_tas25xx, i);
-		if (ret < 0) {
-			dev_err(plat_data->dev, "I2c fail, %d\n", ret);
-			goto post_fw_load_work_done;
-		}
+		set_ch_ignore_on_i2c_err(ret, p_tas25xx->amp_i2c_err, i);
+		if (ret)
+			dev_err(plat_data->dev,
+				"ch=%d swreset failed, err=%d\n", i, ret);
 	}
 
-	ret = tas_write_init_config_params(p_tas25xx, p_tas25xx->ch_count);
-	if (ret) {
-		dev_err(plat_data->dev, "Failed to initialize, error=%d", ret);
+	if (is_err_on_all_ch(p_tas25xx->amp_i2c_err, ch_count)) {
+		tas25xx_log_i2cerr_stats(p_tas25xx);
+		ret = -EIO;
 		goto post_fw_load_work_done;
 	}
 
 	ret = tas25xx_probe(p_tas25xx);
 	if (ret) {
-		dev_err(plat_data->dev, "Failed to initialize, error=%d", ret);
+		dev_err(plat_data->dev, "Failed to initialize, error=%d\n", ret);
 		goto post_fw_load_work_done;
 	}
 
+	if (p_tas25xx->is_reload)
+		goto post_fw_load_work_done;
+
 	ret = tas25xx_setup_irq(p_tas25xx);
-	if (ret) {
-		dev_err(plat_data->dev, "failed to initialize irq=%d", ret);
-	}
+	if (ret)
+		dev_err(plat_data->dev, "failed to initialize irq=%d\n", ret);
 
 post_fw_load_work_done:
 	return ret;
@@ -552,45 +584,66 @@ post_fw_load_work_done:
 
 static void fw_load_work_routine(struct work_struct *work)
 {
-	int ret;
+	int ret, i, ch_count;
 	struct linux_platform *plat_data = NULL;
 	struct tas25xx_priv *p_tas25xx =
 		container_of(work, struct tas25xx_priv, fw_load_work.work);
 
 	plat_data = (struct linux_platform *) p_tas25xx->platform_data;
+	ch_count = p_tas25xx->ch_count;
 
 	ret = tas25xx_load_firmware(p_tas25xx, p_tas25xx->fw_load_retry_count);
-	dev_info(plat_data->dev, "%s FW loading %s", __func__,
+	dev_info(plat_data->dev, "%s FW loading %s\n", __func__,
 		!ret ? "success" : "fail");
-
-	if (!ret) {
+	if (ret) {
+		for (i = 0; i < ch_count; i++)
+			p_tas25xx->ti_amp_state[i] = TAS_AMP_ERR_FW_LOAD;
+	} else {
 		ret = init_dev_with_fw_data(p_tas25xx);
-		if (ret)
+		if (ret) {
 			dev_err(plat_data->dev,
-				"%s fw dnld to device error=%d", __func__, ret);
-		else
-			atomic_set(&p_tas25xx->dev_init_status, 1);
+				"%s fw dnld to device error=%d\n", __func__, ret);
+			for (i = 0; i < ch_count; i++)
+				p_tas25xx->ti_amp_state[i] = TAS_AMP_ERR_I2C;
+		} else {
+			for (i = 0; i < ch_count; i++) {
+				if (is_error_on_ch(p_tas25xx->amp_i2c_err, i))
+					p_tas25xx->ti_amp_state[i] = TAS_AMP_ERR_I2C;
+				else
+					p_tas25xx->ti_amp_state[i] = TAS_AMP_STATE_FW_LOAD_SUCCESS;
+			}
+			ret = TAS25XX_FW_UPDATE_SUCCESS;
+		}
 	}
 
-	if (ret)
-		atomic_set(&p_tas25xx->dev_init_status, ret);
-
+	atomic_set(&p_tas25xx->dev_init_status, ret);
 	wake_up(&p_tas25xx->dev_init_wait);
 }
 
 int tas25xx_start_fw_load(struct tas25xx_priv *p_tas25xx, int retry_count)
 {
+	int ret, ch_count;
+	struct linux_platform *plat_data = NULL;
+
 	atomic_set(&p_tas25xx->dev_init_status, 0);
 	atomic_set(&p_tas25xx->fw_state, TAS25XX_DSP_FW_TRYLOAD);
 	p_tas25xx->fw_load_retry_count = retry_count;
+	plat_data = (struct linux_platform *) p_tas25xx->platform_data;
+	ch_count = p_tas25xx->ch_count;
+
+	tas25xx_check_last_i2c_error_n_reset();
 	INIT_DELAYED_WORK(&p_tas25xx->fw_load_work, fw_load_work_routine);
 	schedule_delayed_work(&p_tas25xx->fw_load_work, msecs_to_jiffies(0));
 
 	wait_event_interruptible(p_tas25xx->dev_init_wait,
-	atomic_read(&p_tas25xx->dev_init_status) != 0);
+		atomic_read(&p_tas25xx->dev_init_status) != 0);
 
-	/* set -ve errno or success 1 */
-	return atomic_read(&p_tas25xx->dev_init_status);
+	/* set -ve errno or success 1*/
+	ret = atomic_read(&p_tas25xx->dev_init_status);
+	if (ret == TAS25XX_FW_UPDATE_SUCCESS)
+		ret = 0;
+
+	return ret;
 }
 
 static int tas25xx_codec_probe(struct snd_soc_component *codec)
@@ -632,7 +685,7 @@ static int tas25xx_codec_probe(struct snd_soc_component *codec)
 
 	snd_soc_dapm_sync(dapm);
 
-	ret = tas25xx_start_fw_load(p_tas25xx, 20);
+	ret = tas25xx_start_fw_load(p_tas25xx, 800);
 	if (ret == -ENOENT)
 		ret = 0;
 
@@ -651,6 +704,7 @@ static void tas25xx_codec_remove(struct snd_soc_component *codec)
 }
 
 static struct snd_soc_component_driver soc_codec_driver_tas25xx = {
+	.name			= "tas25xx",
 	.probe			= tas25xx_codec_probe,
 	.remove			= tas25xx_codec_remove,
 	.read			= tas25xx_codec_read,
@@ -664,7 +718,6 @@ static struct snd_soc_component_driver soc_codec_driver_tas25xx = {
 	.dapm_routes		= tas25xx_audio_map,
 	.num_dapm_routes	= ARRAY_SIZE(tas25xx_audio_map),
 };
-
 
 int tas25xx_register_codec(struct tas25xx_priv *p_tas25xx)
 {

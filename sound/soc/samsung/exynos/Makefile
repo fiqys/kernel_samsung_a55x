@@ -9,4 +9,4 @@ obj-$(CONFIG_SND_SOC_SAMSUNG_SLIF) += slif/
 obj-$(CONFIG_SND_SOC_SAMSUNG_EXYNOS8845_SOUND) += exynos8845_sound.o
 obj-$(CONFIG_SND_SOC_SAMSUNG_EXYNOS8845_AUDIO) += exynos8845_audio.o
 
-obj-$(CONFIG_SND_SOC_SAMSUNG_AUDIO) += sec_audio_sysfs.o sec_audio_debug.o
+obj-$(CONFIG_SND_SOC_SAMSUNG_AUDIO) += sec_audio_sysfs.o sec_audio_debug.o snd_debug_proc.o

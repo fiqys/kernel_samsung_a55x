@@ -1,0 +1,30 @@
+#if 0
+&${vib_parent} {
+	vib_en_gpio: vib_en_gpio {
+		samsung,pins = SEC_GPIO(${vib_gpio});
+		samsung,pin-function = <1>;
+		samsung,pin-pud = <1>;
+		samsung,pin-drv = <0>;
+		samsung,pin-con-pdn = <0>;
+		samsung,pin-pud-pdn = <1>;
+	};
+};
+#endif
+
+&smd {
+	dc_vibrator {
+		compatible = "samsung,dc_vibrator";
+		status = "okay";
+#if 0
+		pinctrl-names = "default";
+		pinctrl-0 = <&vib_en_gpio>;
+		dc_vib,gpio_en = <SEC_GPIO_REF(${vib_gpio}) 0>;
+#endif
+		dc_vib,motor_type = "COINDC";
+#if 1
+		dc_vib,regulator_name = "dc_vib";
+		dc_vib-supply = <&l33_reg>;
+#endif
+	};
+};
+

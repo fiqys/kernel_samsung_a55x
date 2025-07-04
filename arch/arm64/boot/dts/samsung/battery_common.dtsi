@@ -125,7 +125,7 @@
 
 		battery,full_condition_type = <(SEC_BATTERY_FULL_CONDITION_NOTIMEFULL | SEC_BATTERY_FULL_CONDITION_VCELL)>;
 		battery,full_condition_soc = <93>;
-		battery,full_condition_vcell = <4250>;
+		/* battery,full_condition_vcell = FV - 50mV set when variable is parsed */
 
 		battery,recharge_check_count = <1>;
 		battery,recharge_condition_type = <SEC_BATTERY_RECHARGE_CONDITION_VCELL>;
@@ -178,13 +178,11 @@
 		battery,wireless_otg_input_current = <900>;
 
 		/* Calculate Based on Offsets from float voltage, full_condition_vcell and recharge_condition_vcell */
-		/* if you want to use age_data_by_offset concept add battery,age_data_by_offset; */
+		/* if you want to use age_data_by_common_offset concept add battery,age_data_by_common_offset; */
 
 		battery,age_data_cycle = <0 300 400 700 1000>;
 		battery,age_data_full_condition_soc = <93 92 91 90 89>;
-		battery,age_data_chg_float_voltage_offset = <0 20 40 60 110>;
-		battery,age_data_full_condition_vcell_offset = <0 20 40 60 110>;
-		battery,age_data_recharge_condition_vcell_offset = <0 20 40 60 110>;
+		battery,age_data_common_offset = <0 20 40 110>;
 		/* battery,age_data_max_charging_current_offset = <0 100 200 300 400>; */
 
 		/* cycle, chg_float_voltage, recharge_condition_vcell, full_condition_vcell, full_condition_soc, step charging condition */
@@ -289,6 +287,10 @@
 #if 1
 		io-channels = <&s2mpu15_gpadc 2>, <&s2mpu15_gpadc 3>, <&s2mpu15_gpadc 9>;
 		io-channel-names = "adc-temp", "adc-chg-temp", "adc-usb-temp", "n/a", "n/a", "n/a", "n/a", "n/a";
+#endif
+#if 0
+	/*EUR_DETECTION_NODE*/
+	battery,eur_detection = <SEC_GPIO_REF(${eur_detection}) 0 >;
 #endif
 	};
 
@@ -440,7 +442,7 @@
 		};
 	};
 	sec_battery_wireless_power_info: wireless-power-info {
-		count = <9>;
+		count = <11>;
 		current_group_0 {
 			wireless_power_class = <2>;
 			vout = <9000>;
@@ -513,15 +515,31 @@
 			ttf_charge_current = <2300>;
 			rx_power = <15000>;
 		};
+		current_group_9 {
+			wireless_power_class = <2>;
+			vout = <13000>;
+			input_current_limit = <1150>;
+			fast_charging_current = <3150>;
+			ttf_charge_current = <2300>;
+			rx_power = <15000>;
+		};
+		current_group_10 {
+			wireless_power_class = <2>;
+			vout = <10000>;
+			input_current_limit = <1100>;
+			fast_charging_current = <3150>;
+			ttf_charge_current = <2300>;
+			rx_power = <11000>;
+		};
 	};
 };
 
-/* /home/dpi/qb5_8815/workspace/P4_1716/android/kernel/kmodule/battery/suwon/common/dts/a55x/battery_common.dtsi */
+/* /home/dpi/qb5_8814/workspace/P4_1716/android/kernel/kmodule/battery/suwon/common/dts/m56x/battery_common.dtsi */
 #include <dt-bindings/battery/sec-battery.h>
 
-#define MAX_FV 4450
+#define MAX_FV 4480
 #define MAX_FCC 3150
-#define STD_CURR 3820
+#define STD_CURR 4580
 
 &sec_battery {
 	pinctrl-names = "default";
@@ -541,9 +559,9 @@
 	battery,dctp_by_cgtp;
 
 	battery,temp_table_adc = <
-		290 340 397 465 546 640 758 888 1034 1194
-		1375 1575 1792 2023 2265 2509 2744 2962 3165 3341
-		3488 3617 3719
+		285 333 391 459 539 632 741 868 1013 1179
+		1364 1568 1788 2022 2261 2504 2738 2960 3164 3344
+		3496 3630 3733
 		>;
 	battery,temp_table_data = <
 		900 850 800 750 700 650 600 550 500 450
@@ -552,9 +570,9 @@
 		>;
 
 	battery,chg_temp_table_adc = <
-		262 313 371 436 514 607 721 846 987 1147
-		1324 1519 1735 1965 2204 2453 2692 2914 3123 3300
-		3456 3589 3698
+		249 300 361 422 499 589 698 820 962 1119
+		1306 1500 1725 1956 2192 2435 2680 2903 3115 3297
+		3464 3602 3711
 		>;
 	battery,chg_temp_table_data = <
 		900 850 800 750 700 650 600 550 500 450
@@ -563,9 +581,9 @@
 		>;
 
 	battery,usb_temp_table_adc = <
-		290 339 396 464 545 639 756 885 1030 1191
-		1371 1571 1787 2019 2260 2505 2740 2958 3162 3340
-		3487 3617 3718
+		284 332 390 457 537 630 738 865 1009 1175
+		1359 1563 1783 2016 2256 2500 2733 2954 3158 3341
+		3495 3626 3730
 		>;
 	battery,usb_temp_table_data = <
 		900 850 800 750 700 650 600 550 500 450
@@ -578,9 +596,10 @@
 	battery,usb_protection_temp = <500>;
 	battery,temp_gap_bat_usb = <150>;
 
-	battery,wire_warm_current = <3500>;
+	battery,wire_cool3_cool2_thresh = <80>;
+	battery,wire_warm_current = <3530>;
 	battery,wire_cool1_current = <MAX_FCC>;	/* Less than or equal to 0.72C */
-	battery,wire_cool2_current = <1150>;	/* 0.24C */
+	battery,wire_cool2_current = <1170>;	/* 0.24C */
 	battery,wire_cool3_current = <450>;	/* 0.1C */
 
 	battery,chg_high_temp = <590>;
@@ -602,14 +621,11 @@
 	battery,full_check_type = <SEC_BATTERY_FULLCHARGED_FG_CURRENT>;
 	battery,full_check_type_2nd = <SEC_BATTERY_FULLCHARGED_FG_CURRENT>;
 
-	battery,full_condition_vcell = <4390>;
-	battery,recharge_condition_vcell = <4380>;
-
 	battery,chg_float_voltage = <MAX_FV>;
-	battery,high_temp_float = <4200>;
+	battery,high_temp_float = <4230>;
 	battery,low_temp_float = <MAX_FV>;
-	battery,swelling_high_rechg_voltage = <4050>;
-	battery,swelling_low_rechg_voltage = <4300>;
+	battery,swelling_high_rechg_voltage = <4080>;
+	battery,chgen_over_swell_rechg_vol;
 
 	battery,siop_hv_icl = <675>;
 	battery,siop_scenarios = <0>;
@@ -621,70 +637,76 @@
 	battery,chg_ocp_current = <0>;
 
 	battery,max_charging_current = <MAX_FCC>;
-	battery,max_charging_charge_power = <25000>; /* 25W */
+	battery,max_charging_charge_power = <45000>; /* 45W */
 
 	/* trig_step2_LCD_OFF, recov_step2_LCD_OFF, trig_step1_LCD_OFF , recov_step1_LCD_OFF,
 	   trig_step2_LCD_ON, recov_step2_LCD_ON, trig_step1_LCD_ON , recov_step1_LCD_ON,
 	   st1_icl, st1_fcc, st2_icl, st2_fcc */
 	battery,temp_table_LRP_NORMAL = <
-						395 385 385 375
-						395 385 385 375
+						390 380 387 377
+						390 380 380 370
 						1000 2400 1200 1800>;
+
 	battery,temp_table_LRP_25W = <
-						400 390 380 370
+						400 390 387 377
 						400 390 380 370
 						1700 3400 1100 2200>;
 
-	battery,age_data_by_offset; /* Calculate Based on Offset */
+	battery,temp_table_LRP_45W = <
+						405 395 392 382
+						405 395 385 375
+						1700 3400 1100 2200>;
+
+	/* cycle, full_condition_soc, common_offset */
+	battery,age_data_by_common_offset; /* Calculate Based on Common Offset */
 	battery,age_data_cycle = <0 200 250 300 1001>;
 	battery,age_data_full_condition_soc = <93 92 91 90 89>;
-	battery,age_data_chg_float_voltage_offset = <0 20 40 60 110>;
-	battery,age_data_full_condition_vcell_offset = <0 20 40 60 110>;
-	battery,age_data_recharge_condition_vcell_offset = <0 20 40 60 110>;
+	battery,age_data_common_offset = <0 20 40 60 110>;
 	battery,en_batt_full_status_usage;
 
 	/* step charging option */
 	battery,step_chg_type = <0>;
 
 	/* direct step charging option */
-	battery,dc_step_chg_type = <0xE9>;
+	battery,dc_step_chg_type = <0x1A9 0xA9 0xE9 0xE9>;
 	battery,dc_step_chg_charge_power = <22000>;
-	battery,dc_step_chg_step = <3>;
-	battery,dc_step_chg_cond_vol = <4140 4260 MAX_FV>; /*<25w 3step> STEP_CHARGING_CONDITION_VOLTAGE */
-	battery,dc_step_chg_val_vfloat = <4140 4260 MAX_FV>; /* <25w 3step> STEP_CHARGING_CONDITION_FLOAT_VOLTAGE */
-	battery,dc_step_chg_val_iout = <5540 4770 STD_CURR>; /* <25w 3step> */
+	battery,dc_step_chg_step = <4>;
+	battery,dc_step_chg_cond_vol = <4120 4140 4280 MAX_FV>; /*<45w 4step> STEP_CHARGING_CONDITION_VOLTAGE */
+	battery,dc_step_chg_val_vfloat = <4120 4140 4280 MAX_FV>; /* <45w 4step> STEP_CHARGING_CONDITION_FLOAT_VOLTAGE */
+	battery,dc_step_chg_val_iout = <9300 7700 6500 STD_CURR>; /* <45w 4step> */
 	battery,dc_step_chg_iin_check_cnt = <3>;
-	battery,dc_step_chg_cond_soc = <50 68 100>; /* <25w 3step> STEP_CHARGING_CONDITION_SOC */
+	battery,dc_step_chg_cond_soc = <15 35 65 100>; /* <45w 4step> STEP_CHARGING_CONDITION_SOC */
+	battery,dc_step_chg_cond_v_margin = <5>;
 
 	battery,standard_curr = <STD_CURR>;
-	battery,expired_time = <9420>; /* 97 + 60 minutes = 157 */
+	battery,expired_time = <9000>; /* 90 + 60 minutes = 150 */
 	battery,recharging_expired_time = <5400>; /* 90 minutes */
 	battery,battery_full_capacity = <5000>;
 	battery,cisd_max_voltage_thr = <5000>; /* batttery ovp dettection voltage */
 
-	battery,ttf_hv_charge_current = <2870>;
-	battery,ttf_dc25_charge_current = <4630>;
+	battery,ttf_hv_charge_current = <2936>;
+	battery,ttf_dc25_charge_current = <4718>;
+	battery,ttf_dc45_charge_current = <5802>;
 	battery,ttf_capacity = <4900>;
 	battery,cv_data = <
-			3282	840	1846
-			2991	850	1785
-			2476	870	1653
-			2008	890	1491
-			1539	910	1288
-			1083	930	1013
-			770	950	617
-			500	970	140
-			465	990	30
-			456	1000	0
+			4152	860	1529
+			3804	880	1486
+			3217	900	1383
+			2576	920	1260
+			2085	940	1046
+			1504	960	841
+			821	980	378
+			456	990	31
+			428	1000	0
+
 		>;
 
 	battery,support_vpdo;
 	battery,boosting_voltage_aicl;
+	battery,ap_wake_chg;
 };
 
 &sec_battery_cable {
-	default_input_current = <1800>;
-	default_charging_current = <2100>;
 	full_check_current_1st = <490>;
 	full_check_current_2nd = <250>;
 
@@ -695,5 +717,3 @@
 		charging_current = <MAX_FCC>;
 	};
 };
-
-/* /home/dpi/qb5_8815/workspace/P4_1716/android/kernel/kmodule/battery/suwon/common/dts/a55x/battery_common.01.dtsi */

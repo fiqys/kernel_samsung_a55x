@@ -20,6 +20,7 @@ void tas25xx_select_cfg_blk(void *pContext, int conf_no,
 	unsigned char block_type);
 void tas25xx_dump_regs(struct tas25xx_priv  *p_tas25xx, int chn);
 
-
 void tas25xx_register_i2c_error_callback(void (*i2c_err_cb)(uint32_t));
+int tas25xx_check_last_i2c_error_n_reset(void);
+void tas25xx_log_i2cerr_stats(struct tas25xx_priv *p_tas25xx);
 #endif /*__TAS25XX_REGMAP__*/

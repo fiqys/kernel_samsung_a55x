@@ -19,11 +19,6 @@
 #include "../inc/tas25xx-regbin-parser.h"
 #include "../inc/tas25xx-regmap.h"
 
-#define TAS25XX_MDELAY 0xFFFFFFFE
-#define TAS25XX_MSLEEP 0xFFFFFFFD
-#define TAS25XX_IVSENSER_ENABLE  1
-#define TAS25XX_IVSENSER_DISABLE 0
-
 #define STR_RXBITS_SZ 5
 #define STR_16BIT "16BIT"
 #define STR_24BIT "24BIT"
@@ -37,22 +32,16 @@
 #define UINT32_MAX	((u32)(~((u32)0)))
 #endif
 
-int tas25xx_rx_set_bitwidth(struct tas25xx_priv *p_tas25xx,
+int tas25xx_set_rx_bitwidth_for_ch(struct tas25xx_priv *p_tas25xx,
 	int bitwidth, int ch)
 {
-	int ret;
+	int ret = 0;
 	int32_t i;
 	uint32_t size, blk_count, sublk_sz;
 	uint8_t *rx_data = p_tas25xx->block_op_data[ch].rx_fmt_data;
-	uint8_t *fmt;
+	uint8_t *fmt = NULL;
 	struct linux_platform *plat_data =
 		(struct linux_platform *) p_tas25xx->platform_data;
-
-	ret = 0;
-	size = *((uint32_t *)rx_data);
-	rx_data += sizeof(uint32_t);
-	blk_count = *((uint32_t *)rx_data);
-	rx_data += sizeof(uint32_t);
 
 	switch (bitwidth) {
 	case 16:
@@ -68,15 +57,23 @@ int tas25xx_rx_set_bitwidth(struct tas25xx_priv *p_tas25xx,
 		break;
 
 	default:
-		fmt = NULL;
-		dev_info(plat_data->dev,
-			"Not supported params bitwidth %d",
-					bitwidth);
+		dev_info(plat_data->dev, "Not supported params bitwidth %d\n",
+			bitwidth);
 		break;
 	}
 
 	if (!fmt)
 		return -EINVAL;
+
+	dev_info(plat_data->dev, "set %s, ch=%d\n", (char *)fmt, ch);
+
+	if (p_tas25xx->curr_rx_bitwidth[ch] == bitwidth)
+		return 0;
+
+	size = *((uint32_t *)rx_data);
+	rx_data += sizeof(uint32_t);
+	blk_count = *((uint32_t *)rx_data);
+	rx_data += sizeof(uint32_t);
 
 	for (i = 0; i < blk_count; i++) {
 		if (memcmp(fmt, rx_data, STR_RXBITS_SZ) == 0) {
@@ -96,7 +93,7 @@ int tas25xx_rx_set_bitwidth(struct tas25xx_priv *p_tas25xx,
 		ret = -EINVAL;
 
 	if (ret == 0)
-		p_tas25xx->mn_rx_width = bitwidth;
+		p_tas25xx->curr_rx_bitwidth[ch] = bitwidth;
 
 	return ret;
 }
@@ -151,7 +148,7 @@ int tas_dev_interrupt_read(struct tas25xx_priv *p_tas25xx, int chn, int *type)
 		if (!powered_up && intr_info->is_clock_based) {
 			/* ignore clock based interrupt during power off state */
 			dev_dbg(plat_data->dev,
-				"INTR: not checking for %s, reason: not active state",
+				"INTR: not checking for %s, reason: not active state\n",
 				intr_info->name);
 			continue;
 		}
@@ -160,23 +157,24 @@ int tas_dev_interrupt_read(struct tas25xx_priv *p_tas25xx, int chn, int *type)
 			reg = intr_info->reg;
 			ret = p_tas25xx->read(p_tas25xx, chn, reg, &value);
 			if (!ret)
-				dev_info(plat_data->dev,
-					"INTR: ch=%d reg=0x%2x(%d), value=0x%2x(%d)",
+				dev_err(plat_data->dev,
+					"INTR: ch=%d reg=0x%02x(%d), value=0x%02x(%d)\n",
 					chn, reg, reg, value, value);
 		} else {
-			dev_dbg(plat_data->dev, "INTR: skipping reading reg = %d",
+			dev_dbg(plat_data->dev, "INTR: skipping reading reg = %d\n",
 				intr_info->reg);
 		}
 		if (ret) {
 			dev_err(plat_data->dev,
-				"INTR: Error reading the interrupt reg=%d, err=%d", reg, ret);
+				"INTR: Error reading the interrupt reg=%d, err=%d\n", reg, ret);
+			set_ch_ignore(p_tas25xx->amp_i2c_err, chn);
 		} else {
 			if (value & intr_info->mask) {
 				if (powered_up && intr_info->is_clock_based)
 					*type |= INTERRUPT_TYPE_CLOCK_BASED;
 				else
 					*type |= INTERRUPT_TYPE_NON_CLOCK_BASED;
-				dev_info(plat_data->dev, "INTR: Detected, ch=%d, intr=%s",
+				dev_err(plat_data->dev, "INTR: Detected, ch=%d, intr=%s\n",
 					chn, intr_info->name);
 				intr_info->detected = 1;
 				if (intr_info->count < UINT32_MAX)
@@ -206,7 +204,7 @@ int tas25xx_software_reset(struct tas25xx_priv *p_tas25xx, int ch)
 
 	p_tas25xx->devs[ch]->mn_current_book = -1;
 
-	msleep(20);
+	usleep_range(10000, 10100);
 
 	return ret;
 }

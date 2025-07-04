@@ -19,19 +19,19 @@
 			repeater_tune_cnt = /bits/ 8 <0x5>;
 			repeater_tune1 {
 				tune_name = "usb2_rx_control";
-				tune_value = /bits/ 8 <0x06 0x10>;
+				tune_value = /bits/ 8 <0x06 0x12>;
 			};
 			repeater_tune2 {
 				tune_name = "usb2_tx_control1";
-				tune_value = /bits/ 8 <0x07 0x22>;
+				tune_value = /bits/ 8 <0x07 0x23>;
 			};
 			repeater_tune3 {
 				tune_name = "usb2_tx_control2";
-				tune_value = /bits/ 8 <0x08 0x64>;
+				tune_value = /bits/ 8 <0x08 0x65>;
 			};
 			repeater_tune4 {
 				tune_name = "usb2_termination";
-				tune_value = /bits/ 8 <0x09 0x04>;
+				tune_value = /bits/ 8 <0x09 0x02>;
 			};
 			repeater_tune5 {
 				tune_name = "usb2_disconnect_threshold";

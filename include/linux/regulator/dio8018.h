@@ -41,6 +41,7 @@ struct dio8018_regulator_data {
 
 struct dio8018_platform_data {
 	bool wakeup;
+	bool need_self_recovery;
 	int num_regulators;
 	int num_rdata;
 	struct	dio8018_regulator_data *regulators;
@@ -48,6 +49,10 @@ struct dio8018_platform_data {
 	int pmic_irq_gpio;
 	u32 pmic_irq_level_sel;
 	u32 pmic_irq_outmode_sel;
+	int pmic_reset_gpio;
+	bool need_hw_reset;
+	bool need_sw_reset;
+	bool faults_reset_method_hw;
 };
 
 
@@ -99,6 +104,7 @@ enum DIO8018_regulators {
 	DIO8018_LDO_MAX,
 };
 
+#define DIO8018_FLT_SD_B		1 /* 1: Prevents shutdown when a fault occurs */
 
 #define DIO8018_LDO_VSEL_MASK	0xFF
 /* Ramp delay in uV/us */
@@ -111,4 +117,10 @@ enum DIO8018_regulators {
 
 #define DIO8018_REGULATOR_MAX (DIO8018_LDO_MAX)
 
-#endif /*  __LINUX_MFD_DIO8018_H */
+#if IS_ENABLED(CONFIG_SEC_KUNIT)
+extern int dio8018_ldo_current_check(struct regulator_dev *rdev, int min_uA, int max_uA);
+extern struct regulator_desc *dio8018_regulators;
+#endif
+
+#endif	/*  __LINUX_MFD_DIO8018_H */
+
