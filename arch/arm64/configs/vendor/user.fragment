@@ -1,3 +1,13 @@
+# Samsung security/Knox features are disabled here
+# Re-enable for stock-like builds
+# CONFIG_SECURITY_DEFEX is not set
+# CONFIG_KZT is not set
+# CONFIG_FIVE is not set
+# CONFIG_SECURITY_DSMS is not set
+# CONFIG_PROCA is not set
+# CONFIG_PROCA_S_OS is not set
+# CONFIG_FIVE_GKI_10 is not set
+# CONFIG_GAF_V6 is not set
 # CONFIG_UH is not set
 # CONFIG_RKP is not set
 # CONFIG_KDP is not set
@@ -5,6 +15,10 @@
 # CONFIG_RKP_TEST is not set
 # CONFIG_KDP_TEST is not set
 # CONFIG_KNOX_NCM is not set
+# CONFIG_SEC_DEBUG is not set
+# CONFIG_SEC_DEBUG_TSP_LOG is not set
+# End of Samsung security disabled section
+
 # CONFIG_DEBUG_LOCK_ALLOC is not set
 # CONFIG_SLUB_DEBUG_ON is not set
 # CONFIG_EXYNOS_DEBUG_TEST is not set
@@ -12,8 +26,6 @@
 # CONFIG_CORESIGHT is not set
 # CONFIG_CORESIGHT_LINK_AND_SINK_TMC is not set
 # CONFIG_CORESIGHT_CATU is not set
-# CONFIG_SEC_DEBUG is not set
-# CONFIG_SEC_DEBUG_TSP_LOG is not set
 # CONFIG_SOFT_WATCHDOG is not set
 # CONFIG_CORESIGHT_SINK_TPIU is not set
 # CONFIG_CORESIGHT_STM is not set
