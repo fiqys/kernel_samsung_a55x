@@ -5632,6 +5632,8 @@ static void slsi_append_reg_rule_v1(struct slsi_dev *sdev, struct regdb_file_reg
 			            (reg_rule->freq_range->max_bandwidth & 0xFF);
 
 	bulk_data->max_power = reg_rule->max_eirp & 0xFF;
+	if (reg_rule->flags & SLSI_REGULATORY_DUP_RULE)
+		reg_rule->flags |= SLSI_REGULATORY_FW_DUP_RULE;
 	bulk_data->rule_flags = reg_rule->flags & 0xFF;
 }
 
@@ -5684,6 +5686,8 @@ static void slsi_append_reg_rule_v2(struct slsi_dev *sdev, struct regdb_file_reg
 	} else {
 		desc_ie->max_power = reg_rule->max_eirp & 0xFF;
 	}
+	if (reg_rule->flags & SLSI_REGULATORY_DUP_RULE)
+		reg_rule->flags |= SLSI_REGULATORY_FW_DUP_RULE;
 	desc_ie->rule_flags = reg_rule->flags & 0xFF;
 }
 
