@@ -90,6 +90,8 @@ static void test_slsi_del_virtual_intf(struct kunit *test)
 {
 	struct slsi_dev *sdev = TEST_TO_SDEV(test);
 	struct wiphy *wiphy = sdev->wiphy;
+	struct net_device *dev;
+	struct netdev_vif *ndev_vif;
 	struct wireless_dev *wdev = kunit_kzalloc(test, sizeof(struct wireless_dev), GFP_KERNEL);
 	char *name = "wlan0";
 	struct vif_params *params = kunit_kzalloc(test, sizeof(struct vif_params), GFP_KERNEL);
@@ -98,13 +100,9 @@ static void test_slsi_del_virtual_intf(struct kunit *test)
 	SLSI_MUTEX_INIT(sdev->netdev_add_remove_mutex);
 	KUNIT_EXPECT_EQ(test, -EINVAL, slsi_del_virtual_intf(wiphy, wdev));
 
-	test_netdev_init(test, sdev, SLSI_NET_INDEX_P2PX_SWLAN);
-	sdev->netdev_ap = sdev->netdev[SLSI_NET_INDEX_P2PX_SWLAN];
-	memcpy(sdev->netdev_ap->name, name, 5);
-	wdev->netdev = sdev->netdev_ap;
-	KUNIT_EXPECT_EQ(test, 0, slsi_del_virtual_intf(wiphy, wdev));
-
-	test_netdev_init(test, sdev, SLSI_NET_INDEX_P2PX_SWLAN);
+	dev = test_netdev_init(test, sdev, SLSI_NET_INDEX_P2PX_SWLAN);
+	ndev_vif = netdev_priv(dev);
+	ndev_vif->iftype = NL80211_IFTYPE_P2P_GO;
 	sdev->netdev_p2p = sdev->netdev[SLSI_NET_INDEX_P2PX_SWLAN];
 	memcpy(sdev->netdev_p2p->name, name, 5);
 	wdev->netdev = sdev->netdev_p2p;

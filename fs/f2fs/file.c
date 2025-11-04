@@ -916,7 +916,13 @@ static bool f2fs_force_buffered_io(struct inode *inode, int rw)
 		return true;
 	if (fsverity_active(inode))
 		return true;
-	if (f2fs_compressed_file(inode))
+	if (f2fs_has_compressed_data(inode))
+		return true;
+	/*
+	 * only force direct read to use buffered IO, for direct write,
+	 * it expects inline data conversion before committing IO.
+	 */
+	if (f2fs_has_inline_data(inode) && rw == READ)
 		return true;
 	/*
 	 * only force direct read to use buffered IO, for direct write,
@@ -1868,6 +1874,27 @@ next_alloc:
 				
 		f2fs_down_write(&sbi->pin_sem);	
 		
+		if (sbi->pin_guaranteed_blkaddr) {
+			unsigned int secno, last_secno;
+			
+			last_secno = GET_SECNO(sbi, sbi->pin_guaranteed_blkaddr - 1);
+
+			spin_lock(&FREE_I(sbi)->segmap_lock);
+			secno = find_next_zero_bit(FREE_I(sbi)->free_secmap,
+						 MAIN_SECS(sbi), 0);
+			if (secno > last_secno) {
+				spin_unlock(&FREE_I(sbi)->segmap_lock);
+				err = f2fs_gc_for_pinned_type(sbi);
+				if (err) {
+					f2fs_up_write(&sbi->pin_sem);
+					goto out_err;
+				}
+			} else {
+				sbi->pin_reserved_sec = secno;
+				spin_unlock(&FREE_I(sbi)->segmap_lock);
+			}
+		}
+
 		if (sbi->pin_guaranteed_blkaddr) {
 			unsigned int secno, last_secno;
 			
@@ -4452,6 +4479,13 @@ static int f2fs_ioc_compress_file(struct file *filp)
 	if (ret)
 		goto out;
 
+	if (!f2fs_down_write_trylock(&F2FS_I(inode)->i_gc_rwsem[READ])) {
+		ret = -EBUSY;
+		goto out;
+	}
+
+	/* drop extent cache and extent info in on-disk */
+	f2fs_drop_extent_tree(inode);
 	set_inode_flag(inode, FI_ENABLE_COMPRESS);
 
 	last_idx = DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE);
@@ -4485,6 +4519,7 @@ static int f2fs_ioc_compress_file(struct file *filp)
 							LLONG_MAX);
 
 	clear_inode_flag(inode, FI_ENABLE_COMPRESS);
+	f2fs_up_write(&F2FS_I(inode)->i_gc_rwsem[READ]);
 
 	if (ret)
 		f2fs_warn(sbi, "%s: The file might be partially compressed (errno=%d). Please delete the file.",
@@ -4723,6 +4758,13 @@ static ssize_t f2fs_dio_read_iter(struct kiocb *iocb, struct iov_iter *to)
 		f2fs_down_read(&fi->i_gc_rwsem[READ]);
 	}
 
+	 /* Check if compressed after getting locked */
+	if (f2fs_has_compressed_data(inode)) {
+		f2fs_up_read(&fi->i_gc_rwsem[READ]);
+		ret = -EAGAIN;
+		goto out;
+	}
+
 	/*
 	 * We have to use __iomap_dio_rw() and iomap_dio_complete() instead of
 	 * the higher-level function iomap_dio_rw() in order to ensure that the
@@ -4835,8 +4877,11 @@ static ssize_t f2fs_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 	if (f2fs_lfs_mode(F2FS_I_SB(inode)))
 		inode_dio_wait(inode);
 
+again:
 	if (f2fs_should_use_dio(inode, iocb, to)) {
 		ret = f2fs_dio_read_iter(iocb, to);
+		if (ret == -EAGAIN && !(iocb->ki_flags & IOCB_NOWAIT))
+			goto again;
 	} else {
 		ret = filemap_read(iocb, to, 0);
 		if (ret > 0)

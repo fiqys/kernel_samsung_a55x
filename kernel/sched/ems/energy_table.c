@@ -83,6 +83,21 @@ static int get_cap_index(struct energy_state *states, int size, unsigned long ca
 	return min(i, size - 1);
 }
 
+static int get_dpower_index(struct energy_state *states, int size,
+			unsigned long dpower)
+{
+	int i;
+
+	if (size == 0)
+		return -1;
+
+	for (i = 0; i < size; i++)
+		if (states[i].dynamic_power >= dpower)
+			break;
+
+	return min(i, size);
+}
+
 static int get_freq_index(struct energy_state *states, int size, unsigned long freq)
 {
 	int i;
@@ -316,6 +331,16 @@ unsigned int et_cur_freq_idx(int cpu)
 }
 EXPORT_SYMBOL_GPL(et_cur_freq_idx);
 
+unsigned int et_table_size(int cpu)
+{
+	struct energy_table *table = per_cpu_et(cpu);
+
+	if (unlikely(!table))
+		return 0;
+
+	return table->nr_states;
+}
+
 unsigned long et_cur_cap(int cpu)
 {
 	struct energy_table *table = per_cpu_et(cpu);
@@ -355,6 +380,39 @@ unsigned long et_freq_to_cap(int cpu, unsigned long freq)
 		return 0;
 
 	return table->default_state[index].capacity;
+}
+
+unsigned long et_freq_to_dpower(int cpu, unsigned long freq)
+{
+	struct energy_table *table = per_cpu_et(cpu);
+	int index = get_freq_index(table->default_state, table->nr_states, freq);
+
+	if (index < 0)
+		return 0;
+
+	return table->default_state[index].dynamic_power;
+}
+
+unsigned long et_dpower_to_cap(int cpu, unsigned long dpower)
+{
+	struct energy_table *table = per_cpu_et(cpu);
+	int index = get_dpower_index(table->default_state, table->nr_states, dpower);
+
+	if (index < 0)
+		return 0;
+
+	return table->default_state[index].capacity;
+}
+
+unsigned long et_dpower_to_freq(int cpu, unsigned long dpower)
+{
+	struct energy_table *table = per_cpu_et(cpu);
+	int index = get_dpower_index(table->default_state, table->nr_states, dpower);
+
+	if (index < 0)
+		return 0;
+
+	return table->default_state[index].frequency;
 }
 
 void et_update_freq(int cpu, unsigned long cpu_freq)
@@ -419,6 +477,26 @@ unsigned long et_compute_system_energy(const struct list_head *csd_head,
 	return energy;
 }
 
+unsigned long et_min_dpower(int cpu)
+{
+	struct energy_table *table = per_cpu_et(cpu);
+
+	if (!table->default_state)
+		return 0;
+
+	return table->default_state[0].dynamic_power;
+}
+
+unsigned long et_max_dpower(int cpu)
+{
+	struct energy_table *table = per_cpu_et(cpu);
+
+	if (!table->default_state)
+		return 0;
+
+	return table->default_state[table->nr_states - 1].dynamic_power;
+}
+
 /****************************************************************************************
  *					CPUFREQ Change VH				*
  ****************************************************************************************/
@@ -432,6 +510,27 @@ void et_arch_set_freq_scale(const struct cpumask *cpus,
 		table->cur_index = index;
 }
 EXPORT_SYMBOL_GPL(et_arch_set_freq_scale);
+
+/******************************************************************************/
+/* energy table notify                                                         */
+/******************************************************************************/
+static RAW_NOTIFIER_HEAD(et_chain);
+
+/* emstune.lock *MUST* be held before notifying */
+static int et_table_init_notify(int cpu)
+{
+	return raw_notifier_call_chain(&et_chain, 0, &cpu);
+}
+
+int et_register_notifier(struct notifier_block *nb)
+{
+	return raw_notifier_chain_register(&et_chain, nb);
+}
+
+int et_unregister_notifier(struct notifier_block *nb)
+{
+	return raw_notifier_chain_unregister(&et_chain, nb);
+}
 
 /****************************************************************************************
  *					Notifier Call					*
@@ -745,6 +844,7 @@ void et_init_table(struct cpufreq_policy *policy)
 	struct device *dev;
 	struct cpufreq_frequency_table *cursor;
 	int table_size = 0, table_index, i = 0;
+	int cpu = cpumask_first(policy->cpus);
 
 	table = per_cpu_et(policy->cpu);
 	if (unlikely(!table))
@@ -803,6 +903,8 @@ void et_init_table(struct cpufreq_policy *policy)
 
 	for (table_index = 0; table_index < table->nr_table; table_index++)
 		update_capacity(table_index);
+
+	et_table_init_notify(cpu);
 }
 
 static int parse_multi_table(struct energy_table *table,

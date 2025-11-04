@@ -70,7 +70,6 @@ struct mfc_dev *g_mfc_dev;
 void mfc_butler_worker(struct work_struct *work)
 {
 	struct mfc_dev *dev;
-	struct mfc_core *subcore;
 	struct mfc_ctx *ctx;
 	int i;
 
@@ -85,22 +84,14 @@ void mfc_butler_worker(struct work_struct *work)
 			return;
 		}
 
-		if (!IS_MULTI_MODE(ctx))
+		/* [DRC] In the case of MFC_OP_SWITCH_TO_SINGLE,
+		 * also need to request with MFC_WORK_TRY.
+		 * Because op_mode is maintained as MFC_OP_SWITCH_TO_SINGLE before subcore_deinit.
+		 * And, subcore_deinit can be started by MFC_WORK_TRY.
+		 */
+		if (!(IS_MULTI_MODE(ctx) ||
+			((ctx->op_mode == MFC_OP_SWITCH_TO_SINGLE) && ctx->handle_drc_multi_mode)))
 			return;
-
-		/* subcore only for QoS control */
-		if (IS_TWO_MODE1(ctx)) {
-			if (ctx->dynamic_weight_mb) {
-				subcore = mfc_get_sub_core(dev, ctx);
-				if (!subcore) {
-					mfc_dev_err("[RM] There is no subcore\n");
-					return;
-				}
-				subcore->core_ctx[ctx->num]->dynamic_weight_mb = ctx->dynamic_weight_mb;
-				mfc_qos_on(subcore, ctx);
-			}
-			return;
-		}
 
 		mfc_rm_request_work(dev, MFC_WORK_TRY, ctx);
 	} else {
@@ -208,7 +199,9 @@ static int __mfc_init_dec_ctx(struct mfc_ctx *ctx)
 	dec->immediate_display = 0;
 	dec->is_dts_mode = 0;
 	dec->inter_res_change = 0;
-	dec->disp_res_change = 0;
+	dec->disp_drc.disp_res_change = 0;
+	dec->disp_drc.push_idx = 0;
+	dec->disp_drc.pop_idx = 0;
 
 	dec->is_dynamic_dpb = 1;
 	dec->dynamic_used = 0;

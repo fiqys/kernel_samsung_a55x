@@ -1799,6 +1799,11 @@ static void dm_submit_bio(struct bio *bio)
 		goto out;
 	}
 
+	if (test_bit(DMF_RELIABLE_WRITE, &md->flags)
+		&& (bio_op(bio) == REQ_OP_WRITE)) {
+		bio->bi_opf |= REQ_RELIABLE;
+	}
+
 	/* If suspended, queue this IO for later */
 	if (unlikely(test_bit(DMF_BLOCK_IO_FOR_SUSPEND, &md->flags))) {
 		if (bio->bi_opf & REQ_NOWAIT)

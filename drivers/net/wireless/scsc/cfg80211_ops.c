@@ -70,6 +70,7 @@ static bool slsi_is_mhs_active(struct slsi_dev *sdev, u8 *ifname)
 	struct netdev_vif *ndev_vif;
 	bool ret;
 
+	SLSI_INFO(sdev, "is MHS (%s) active?\n", ifname);
 	mhs_dev = slsi_get_netdev_by_ifname(sdev, ifname);
 	if (mhs_dev) {
 		ndev_vif = netdev_priv(mhs_dev);
@@ -127,7 +128,8 @@ struct wireless_dev *slsi_add_virtual_intf(struct wiphy        *wiphy,
 #if (LINUX_VERSION_CODE <= KERNEL_VERSION(4, 11, 0))
 	SLSI_UNUSED_PARAMETER(flags);
 #endif
-	SLSI_NET_DBG1(dev, SLSI_CFG80211, "Intf name:%s, type:%d, macaddr:%pM\n", name, type, params->macaddr);
+	SLSI_NET_INFO(dev, "Intf name:%s, type:%d, macaddr:" MACSTR "\n",
+		      name, type, MAC2STR(params->macaddr));
 
 	if (type == NL80211_IFTYPE_AP_VLAN) {
 		if (sdev->num_ap_vlan == SLSI_MAX_AP_VLAN) {
@@ -155,7 +157,7 @@ struct wireless_dev *slsi_add_virtual_intf(struct wiphy        *wiphy,
 				   slsi_get_netdev_by_ifname(sdev, ap_if_name));
 	} else {
 		rcu_read_lock();
-		if (slsi_is_mhs_active(sdev, sdev->netdev_ap->name)) {
+		if (sdev->netdev_ap && slsi_is_mhs_active(sdev, sdev->netdev_ap->name)) {
 			rcu_read_unlock();
 			SLSI_ERR(sdev, "MHS is active. cannot add new interface\n");
 			return ERR_PTR(-EOPNOTSUPP);
@@ -175,17 +177,16 @@ int slsi_del_virtual_intf(struct wiphy *wiphy, struct wireless_dev *wdev)
 	struct net_device *dev = wdev->netdev;
 	struct slsi_dev *sdev = SDEV_FROM_WIPHY(wiphy);
 	struct netdev_vif *ndev_vif = netdev_priv(dev);
+	struct netdev_vif *ndev_vif_p2p = NULL;
 	bool is_cfg80211 = true;
 
 	if (WLBT_WARN_ON(!dev))
 		return -EINVAL;
 
-	SLSI_NET_DBG1(dev, SLSI_CFG80211, "Dev name:%s\n", dev->name);
+	SLSI_NET_INFO(dev, "Dev name:%s, type:%d\n", dev->name, ndev_vif->iftype);
 
 	/* for p2p-wlan0-0 or p2p-p2p0-x */
 	if (strncmp(dev->name, "p2p-", 4) == 0) {
-		struct netdev_vif *ndev_vif_p2p = NULL;
-
 		ndev_vif_p2p = netdev_priv(sdev->netdev[SLSI_NET_INDEX_P2P]);
 		if (sdev->p2p_state != P2P_IDLE_NO_VIF && ndev_vif_p2p && ndev_vif_p2p->drv_in_p2p_procedure) {
 			ndev_vif_p2p->drv_in_p2p_procedure = false;
@@ -196,16 +197,25 @@ int slsi_del_virtual_intf(struct wiphy *wiphy, struct wireless_dev *wdev)
 
 	SLSI_MUTEX_LOCK(sdev->netdev_add_remove_mutex);
 	slsi_stop_net_dev(sdev, dev);
-	slsi_netif_remove_locked(sdev, dev, is_cfg80211);
 
+	if (ndev_vif->iftype == NL80211_IFTYPE_AP) {
+		SLSI_MUTEX_UNLOCK(sdev->netdev_add_remove_mutex);
+		return 0;
+	}
+
+	slsi_netif_remove_locked(sdev, dev, is_cfg80211);
 	if (ndev_vif->iftype == NL80211_IFTYPE_AP_VLAN) {
 		sdev->num_ap_vlan--;
 		SLSI_MUTEX_UNLOCK(sdev->netdev_add_remove_mutex);
 		return 0;
 	}
 
-	if (dev == sdev->netdev_ap)
+	if (dev == sdev->netdev_ap) {
+		/* HOST-21023: Make it dead-code with netdev_ap.
+		 *  Need to revise it if it was introduced for a certain purpose.
+		 */
 		rcu_assign_pointer(sdev->netdev_ap, NULL);
+	}
 	if (!sdev->netdev[SLSI_NET_INDEX_P2PX_SWLAN])
 		rcu_assign_pointer(sdev->netdev[SLSI_NET_INDEX_P2PX_SWLAN], sdev->netdev_ap);
 	if (dev == sdev->netdev_p2p)

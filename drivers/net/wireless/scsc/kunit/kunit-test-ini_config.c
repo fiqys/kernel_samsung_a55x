@@ -131,7 +131,10 @@ static void test_encode_mib_octet_with_2indices(struct kunit *test)
 	s8 octet_index = -1;
 	u16 psid = SLSI_PSID_UNIFI_ROAM_IDLE_VARIATION_RSSI;
 	int unit_con_factor = 1;		//slsi_ini_config_lookup_table[]
+	sdev->sig_wait.cfm = fapi_alloc(mlme_set_cfm, MLME_SET_CFM, 0, 128);
 
+	((struct slsi_skb_cb *)sdev->sig_wait.cfm->cb)->data_length = 1;
+	((struct slsi_skb_cb *)sdev->sig_wait.cfm->cb)->sig_length = 1;
 	KUNIT_EXPECT_EQ(test, 0, encode_mib_octet_with_2indices(sdev, buf, &pos, value,
 					index1, index2, octet_index, psid, unit_con_factor));
 	KUNIT_EXPECT_EQ(test, 0, encode_mib_octet_with_2indices(sdev, buf, &pos, NULL,

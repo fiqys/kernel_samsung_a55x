@@ -201,7 +201,7 @@
 						40 { pname = "VDDA_WIDE_1P8"; pin = <PIN_REGULATOR 1 500>; };
 						50 { pname = "VDDD_WIDE_1P1_V"; pin = <PIN_REGULATOR 1 500 1104000>; };
 						55 { pname = "VDDOIS_WIDE_3P3"; pin = <PIN_REGULATOR 1 500>; };
-						60 { pname = "VDDAF_WIDE_3P3"; pin = <PIN_REGULATOR 1 1000>; };
+						60 { pname = "VDDAF_WIDE_3P3"; pin = <PIN_REGULATOR 1 0>; actuator_i2c_delay = <10000>;};
 						70 { pname = "on_i2c"; pin = <PIN_I2C 1 0>; };
 						80 { pname = "pin"; pin = <PIN_FUNCTION 2 0>; };
 						90 { pname = "MCLK"; pin = <PIN_MCLK 1 1500>; };
@@ -240,7 +240,7 @@
 						40 { pname = "VDDA_WIDE_1P8"; pin = <PIN_REGULATOR 1 500>; };
 						50 { pname = "VDDD_WIDE_1P1_V"; pin = <PIN_REGULATOR 1 500 1104000>; };
 						55 { pname = "VDDOIS_WIDE_3P3"; pin = <PIN_REGULATOR 1 500>; };
-						60 { pname = "VDDAF_WIDE_3P3"; pin = <PIN_REGULATOR 1 1000>; };
+						60 { pname = "VDDAF_WIDE_3P3"; pin = <PIN_REGULATOR 1 0>; actuator_i2c_delay = <10000>;};
 						70 { pname = "on_i2c"; pin = <PIN_I2C 1 0>; };
 						80 { pname = "pin"; pin = <PIN_FUNCTION 2 0>; };
 						90 { pname = "MCLK"; pin = <PIN_MCLK 1 1500>; };

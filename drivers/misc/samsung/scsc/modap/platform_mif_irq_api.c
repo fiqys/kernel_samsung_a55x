@@ -244,8 +244,12 @@ void platform_mif_irq_reg_handler(struct scsc_mif_abs *interface, void (*handler
 	struct platform_mif *platform = platform_mif_from_mif_abs(interface);
 	unsigned long flags;
 
+#ifdef CONFIG_SCSC_WLBT_PTR_PRINT
 	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Registering mif int handler %pS in %p %p\n", handler, platform,
 			  interface);
+#else
+	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Registering mif int handler\n");
+#endif
 	spin_lock_irqsave(&platform->mif_spinlock, flags);
 	platform->wlan_handler = handler;
 	platform->irq_dev = dev;
@@ -257,7 +261,11 @@ void platform_mif_irq_unreg_handler(struct scsc_mif_abs *interface)
 	struct platform_mif *platform = platform_mif_from_mif_abs(interface);
 	unsigned long flags;
 
+#ifdef CONFIG_SCSC_WLBT_PTR_PRINT
 	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Unregistering mif int handler %pS\n", interface);
+#else
+	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Unregistering mif int handler\n");
+#endif
 	spin_lock_irqsave(&platform->mif_spinlock, flags);
 	platform->wlan_handler = platform_mif_irq_default_handler;
 	platform->irq_dev = NULL;
@@ -270,8 +278,12 @@ void platform_mif_irq_reg_handler_wpan(struct scsc_mif_abs *interface, void (*ha
 	struct platform_mif *platform = platform_mif_from_mif_abs(interface);
 	unsigned long flags;
 
+#ifdef CONFIG_SCSC_WLBT_PTR_PRINT
 	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Registering mif int handler for WPAN %pS in %p %p\n", handler,
 			  platform, interface);
+#else
+	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Registering mif int handler for WPAN\n");
+#endif
 	spin_lock_irqsave(&platform->mif_spinlock, flags);
 	platform->wpan_handler = handler;
 	platform->irq_dev_wpan = dev;
@@ -283,7 +295,11 @@ void platform_mif_irq_unreg_handler_wpan(struct scsc_mif_abs *interface)
 	struct platform_mif *platform = platform_mif_from_mif_abs(interface);
 	unsigned long flags;
 
+#ifdef CONFIG_SCSC_WLBT_PTR_PRINT
 	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Unregistering mif int handler for WPAN %pS\n", interface);
+#else
+	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Unregistering mif int handler for WPAN\n");
+#endif
 	spin_lock_irqsave(&platform->mif_spinlock, flags);
 	platform->wpan_handler = platform_mif_irq_default_handler;
 	platform->irq_dev_wpan = NULL;
@@ -295,8 +311,12 @@ void platform_mif_irq_reg_reset_request_handler(struct scsc_mif_abs *interface,
 {
 	struct platform_mif *platform = platform_mif_from_mif_abs(interface);
 
+#ifdef CONFIG_SCSC_WLBT_PTR_PRINT
 	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Registering mif reset_request int handler %pS in %p %p\n", handler,
 			  platform, interface);
+#else
+	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Registering mif reset_request int handler\n");
+#endif
 	platform->reset_request_handler = handler;
 	platform->irq_reset_request_dev = dev;
 	if (atomic_read(&platform->wlbt_irq[PLATFORM_MIF_WDOG].irq_disabled_cnt)) {
@@ -311,7 +331,11 @@ void platform_mif_irq_unreg_reset_request_handler(struct scsc_mif_abs *interface
 {
 	struct platform_mif *platform = platform_mif_from_mif_abs(interface);
 
+#ifdef CONFIG_SCSC_WLBT_PTR_PRINT
 	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "UnRegistering mif reset_request int handler %pS\n", interface);
+#else
+	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "UnRegistering mif reset_request int handler\n");
+#endif
 	platform->reset_request_handler = platform_mif_irq_reset_request_default_handler;
 	platform->irq_reset_request_dev = NULL;
 }
@@ -322,8 +346,12 @@ void platform_mif_irq_reg_pmu_handler(struct scsc_mif_abs *interface, void (*han
 	struct platform_mif *platform = platform_mif_from_mif_abs(interface);
 	unsigned long flags;
 
+#ifdef CONFIG_SCSC_WLBT_PTR_PRINT
 	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Registering mif pmu int handler %pS in %p %p\n", handler, platform,
 			  interface);
+#else
+	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Registering mif pmu int handler\n");
+#endif
 	spin_lock_irqsave(&platform->mif_spinlock, flags);
 	platform->pmu_handler = handler;
 	platform->irq_dev_pmu = dev;
@@ -539,7 +567,11 @@ irqreturn_t platform_mif_isr(int irq, void *data)
 {
 	struct platform_mif *platform = (struct platform_mif *)data;
 
+#ifdef CONFIG_SCSC_WLBT_PTR_PRINT
 	SCSC_TAG_DEBUG_DEV(PLAT_MIF, platform->dev, "INT %pS\n", platform->wlan_handler);
+#else
+	SCSC_TAG_DEBUG_DEV(PLAT_MIF, platform->dev, "INT\n");
+#endif
 	if (platform->wlan_handler != platform_mif_irq_default_handler) {
 		platform->wlan_handler(irq, platform->irq_dev);
 	}
@@ -556,7 +588,11 @@ irqreturn_t platform_mif_isr_wpan(int irq, void *data)
 {
 	struct platform_mif *platform = (struct platform_mif *)data;
 
+#ifdef CONFIG_SCSC_WLBT_PTR_PRINT
 	SCSC_TAG_DEBUG_DEV(PLAT_MIF, platform->dev, "INT %pS\n", platform->wpan_handler);
+#else
+	SCSC_TAG_DEBUG_DEV(PLAT_MIF, platform->dev, "INT\n");
+#endif
 	if (platform->wpan_handler != platform_mif_irq_default_handler) {
 		platform->wpan_handler(irq, platform->irq_dev_wpan);
 	} else {

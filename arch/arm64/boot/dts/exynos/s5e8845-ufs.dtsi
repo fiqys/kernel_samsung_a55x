@@ -69,6 +69,10 @@
 		/* gear scale flags */
 //		samsung,ufs-gear-scale;
 		devfreq = <&devfreq_1>;
+
+		/* Affine IRQ for 8845 for Random Performance improvement */
+		ufs,hcd_irq_affinity = <4>;
+
 		/* ----------------------- */
 		/* 4. ADDITIONAL NODES     */
 		/* ----------------------- */

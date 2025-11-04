@@ -2156,6 +2156,10 @@ config SND_SOC_TPA6130A2
 	tristate "Texas Instruments TPA6130A2 headphone amplifier"
 	depends on I2C
 
+config SND_SOC_FS1816
+	tristate "FourSemi fs1816 i2c driver"
+	depends on I2C
+
 config SND_SOC_LPASS_MACRO_COMMON
         tristate
 

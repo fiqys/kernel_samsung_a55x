@@ -752,6 +752,9 @@ enum aa_capture_intent {
 	AA_CAPTURE_INTENT_STILL_CAPTURE_REMOSAIC_EXPOSURE_DYNAMIC_SHOT          = 175,
 	AA_CAPTURE_INTENT_STILL_CAPTURE_HIGHRES_EXPERT_RAW_DYNAMIC_SHOT         = 176,
 
+	AA_CAPTURE_INTENT_STILL_CAPTURE_AI_ZOOM_TETRA_PXM_DEF                   = 184,
+	AA_CAPTURE_INTENT_STILL_CAPTURE_AI_ZOOM_TETRA_NEON_PXM_DEF              = 185,
+
 	AA_CAPTURE_INTENT_VIDEO_RECORD_CHANGE_FPS                               = 500,
 	AA_CAPTURE_INTENT_VIDEO_RECORD_START                                    = 501,
 	AA_CAPTURE_INTENT_VIDEO_RECORD_STOP                                     = 502,
@@ -845,6 +848,12 @@ enum aa_scene_mode {
 	AA_SCENE_MODE_LIGHT_TRAIL      = 148,
 	AA_SCENE_MODE_ASTRO            = 149,
 	AA_SCENE_MODE_SW_ND_FILTER     = 150,
+	AA_SCENE_MODE_STEREO_VIDEO     = 151,
+	AA_SCENE_MODE_STEREO_PHOTO     = 152,
+	AA_SCENE_MODE_PHOTO_AUTO_FRAMING = 153,
+	AA_SCENE_MODE_VIRTUAL_APERTURE = 154,
+	AA_SCENE_MODE_MID_HIGHRES      = 155,
+	AA_SCENE_MODE_ARC_HIGHRES_EXPERT_RAW = 156,
 };
 
 enum aa_effect_mode {
@@ -1180,11 +1189,12 @@ enum aa_remosaic_crop_zoom_ratio {
 };
 
 enum aa_captureExtraInfo_mask {
-	AA_CAPTURE_EXTRA_INFO_REMOSAIC_PROCESSED_BAYER = 1 << 0,   /* bit 0       */
-	AA_CAPTURE_EXTRA_INFO_CROPPED_REMOSAIC_SEAMLESS = 1 << 1,   /* bit 1       */
+	AA_CAPTURE_EXTRA_INFO_REMOSAIC_PROCESSED_BAYER  = 1 << 0,           /* bit 0       */
+	AA_CAPTURE_EXTRA_INFO_CROPPED_REMOSAIC_SEAMLESS = 1 << 1,           /* bit 1       */
 	AA_CAPTURE_EXTRA_INFO_PREVIEW_CROPPED_REMOSAIC_SEAMLESS = 1 << 2,   /* bit 2       */
-	AA_CAPTURE_EXTRA_INFO_SUB_CAM_CAPTURE = 1 << 3,            /* bit 3       */
-	AA_CAPTURE_EXTRA_INFO_CROPPED_REMOSAIC_ZOOM = 0xFF << 24,  /* bit 24 ~ 31 */
+	AA_CAPTURE_EXTRA_INFO_SUB_CAM_CAPTURE           = 1 << 3,           /* bit 3       */
+	AA_CAPTURE_EXTRA_INFO_RC_PATTERN                = 0x03 < 22,        /* bit 22 ~ 23, RGB(0), TETRA(1) */
+	AA_CAPTURE_EXTRA_INFO_CROPPED_REMOSAIC_ZOOM     = 0xFF << 24,       /* bit 24 ~ 31 */
 };
 
 enum aa_aeb_state {
@@ -1314,7 +1324,8 @@ struct camera2_aa_ctl {
 	enum aa_transient_action	vendor_transientAction;
 	enum aa_adaptive_pixel_mode	vendor_adaptivePixelMode;
 	enum aa_video_dr_mode		vendor_videoDrMode;
-	uint32_t			vendor_reserved[5];
+	uint32_t 			vendor_skinTemperature;
+	uint32_t			vendor_reserved[4];
 };
 
 struct aa_apexInfo {
@@ -2167,6 +2178,7 @@ enum camera_scene_optimizer_modes {
 enum camera_fold_state {
 	CAMERA_FOLD_UNFOLDED = 0,
 	CAMERA_FOLD_FOLDED = 6,
+	CAMERA_FOLD_HALF_FOLDED = 0x10000006, // Tent mode, 3rd party only
 	CAMERA_FOLD_INVALID = 0xFF,
 };
 

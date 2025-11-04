@@ -471,6 +471,44 @@ static void test_slsi_gscan_get_scan_policy(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, FAPI_SCANPOLICY_ANY_RA, slsi_gscan_get_scan_policy(scan_policy));
 }
 
+static void test_slsi_gscan_add_read_params(struct kunit *test)
+{
+       struct slsi_nl_gscan_param *nl_gscan_param = kunit_kzalloc(test, sizeof(struct slsi_nl_gscan_param), GFP_KERNEL);
+       struct sk_buff  *nl_skb;
+       struct nlmsghdr *nl_hdr = NULL;
+       struct nlattr   *nlattr_nested, *nlattr_nested2;
+
+       nl_skb = nlmsg_new(100, GFP_KERNEL);
+       nl_hdr = nlmsg_hdr(nl_skb);
+       nlmsg_put(nl_skb, 0, 0, 0, 0, 0);
+       nla_put_u32(nl_skb, GSCAN_ATTRIBUTE_BASE_PERIOD, 1);
+       nla_put_u32(nl_skb, GSCAN_ATTRIBUTE_NUM_AP_PER_SCAN, 1);
+       nla_put_u32(nl_skb, GSCAN_ATTRIBUTE_REPORT_THRESHOLD, 1);
+       nla_put_u32(nl_skb, GSCAN_ATTRIBUTE_REPORT_THRESHOLD_NUM_SCANS, 1);
+       nla_put_u32(nl_skb, GSCAN_ATTRIBUTE_NUM_BUCKETS, SLSI_GSCAN_MAX_BUCKETS + 1);
+
+       nlattr_nested = nla_nest_start(nl_skb, GSCAN_ATTRIBUTE_CH_BUCKET_1);
+       nla_put_u32(nl_skb, GSCAN_ATTRIBUTE_BUCKET_ID, 1);
+       nla_put_u32(nl_skb, GSCAN_ATTRIBUTE_BUCKET_PERIOD, 1);
+       nla_put_u32(nl_skb, GSCAN_ATTRIBUTE_BUCKET_NUM_CHANNELS, SLSI_GSCAN_MAX_CHANNELS + 1);
+
+       nlattr_nested2 = nla_nest_start(nl_skb, GSCAN_ATTRIBUTE_BUCKET_CHANNELS);
+       nla_nest_end(nl_skb, nlattr_nested2);
+
+       nla_put_u32(nl_skb, GSCAN_ATTRIBUTE_BUCKETS_BAND, 1);
+       nla_put_u32(nl_skb, GSCAN_ATTRIBUTE_REPORT_EVENTS, 1);
+       nla_put_u32(nl_skb, GSCAN_ATTRIBUTE_BUCKET_EXPONENT, 1);
+       nla_put_u32(nl_skb, GSCAN_ATTRIBUTE_BUCKET_STEP_COUNT, 1);
+       nla_put_u32(nl_skb, GSCAN_ATTRIBUTE_BUCKET_MAX_PERIOD, 1);
+       nla_put_u32(nl_skb, GSCAN_ATTRIBUTE_MAX, 1);
+       nla_nest_end(nl_skb, nlattr_nested);
+
+       nlmsg_end(nl_skb, nl_hdr);
+
+       KUNIT_EXPECT_EQ(test, 0, slsi_gscan_add_read_params(nl_gscan_param, nlmsg_data(nl_hdr), nlmsg_len(nl_hdr)));
+       nlmsg_free(nl_skb);
+}
+
 static void test_slsi_gscan_add_verify_params(struct kunit *test)
 {
 	struct slsi_nl_gscan_param *nl_gscan_param = kunit_kzalloc(test, sizeof(struct slsi_nl_gscan_param), GFP_KERNEL);
@@ -2196,6 +2234,7 @@ static struct kunit_case nl80211_vendor_test_cases[] = {
 	KUNIT_CASE(test_slsi_check_scan_result),
 	KUNIT_CASE(test_slsi_gscan_handle_scan_result),
 	KUNIT_CASE(test_slsi_gscan_get_scan_policy),
+	KUNIT_CASE(test_slsi_gscan_add_read_params),
 	KUNIT_CASE(test_slsi_gscan_add_verify_params),
 	KUNIT_CASE(test_slsi_gscan_add_to_list),
 	KUNIT_CASE(test_slsi_gscan_alloc_buckets),

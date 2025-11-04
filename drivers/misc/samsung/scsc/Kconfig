@@ -418,4 +418,10 @@ config SCSC_COMMON_ANDROID
 	default y
 	help
 		Enable support for Android specific aspects of the common driver.
+
+config SCSC_WLBT_PTR_PRINT
+	bool "Enable this flag to print memory address used for debugging"
+	default n
+	help
+		Enable this flag to print memory address used for debugging
 endif

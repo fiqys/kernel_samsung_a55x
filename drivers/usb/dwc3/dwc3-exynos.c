@@ -471,6 +471,8 @@ void dwc3_exynos_gadget_disconnect_proc(struct dwc3 *dwc)
 {
 	int			reg;
 
+	dwc->suspended = false;
+
 	reg = dwc3_exynos_readl(dwc->regs, DWC3_DCTL);
 	reg &= ~DWC3_DCTL_INITU1ENA;
 	dwc3_exynos_writel(dwc->regs, DWC3_DCTL, reg);

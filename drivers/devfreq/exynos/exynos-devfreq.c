@@ -72,6 +72,13 @@ static struct exynos_devfreq_data **devfreq_data;
 #if IS_ENABLED(CONFIG_SOC_S5E9945) || IS_ENABLED(CONFIG_SOC_S5E8845)
 static int devfreq_idle_ip_index;
 #endif
+#if IS_ENABLED(CONFIG_SOC_S5E8845)
+#define DEVFREQ_DNC	3
+#define BTS_DEFAULT	0
+#define BTS_CAMERA	6
+#define BTS_DNC0	23
+#define BTS_DNC1	24
+#endif
 #if IS_ENABLED(CONFIG_EXYNOS_LEALT_DVFS)
 extern struct platform_driver arm_memlat_mon_driver;
 #endif
@@ -394,6 +401,16 @@ static inline int exynos_devfreq_set_freq_pre(struct exynos_devfreq_data *data,
 			bts_update_scen(BS_MIF_CHANGE, data->new_freq);
 	}
 
+#if IS_ENABLED(CONFIG_SOC_S5E8845)
+	if (data->devfreq_type == DEVFREQ_DNC) {
+		if (*target_freq < 444000) {
+			bts_change_mo(BTS_DEFAULT, BTS_DNC0, 0x40, 0x8);
+			bts_change_mo(BTS_DEFAULT, BTS_DNC1, 0x40, 0x8);
+			bts_change_mo(BTS_CAMERA, BTS_DNC0, 0x30, 0x8);
+			bts_change_mo(BTS_CAMERA, BTS_DNC1, 0x30, 0x8);
+		}
+	}
+#endif
 	if (data->pm_domain) {
 		if (!exynos_pd_status(data->pm_domain)) {
 			dev_err(data->dev, "power domain %s is offed\n", data->pm_domain->name);
@@ -479,6 +496,17 @@ static int exynos_devfreq_target(struct exynos_devfreq_data *data,
 	ret = exynos_devfreq_set_freq(data, target_freq);
 	if (ret)
 		goto out;
+
+#if IS_ENABLED(CONFIG_SOC_S5E8845)
+	if (data->devfreq_type == DEVFREQ_DNC) {
+		if (*target_freq >= 444000) {
+			bts_change_mo(BTS_DEFAULT, BTS_DNC0, 0x40, 0x40);
+			bts_change_mo(BTS_DEFAULT, BTS_DNC1, 0x40, 0x40);
+			bts_change_mo(BTS_CAMERA, BTS_DNC0, 0x30, 0x30);
+			bts_change_mo(BTS_CAMERA, BTS_DNC1, 0x30, 0x30);
+		}
+	}
+#endif
 
 #if IS_ENABLED(CONFIG_EXYNOS_DVFS_MANAGER)
 	/* Post-process for scaling freqeucny */

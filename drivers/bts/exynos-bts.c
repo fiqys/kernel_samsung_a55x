@@ -34,6 +34,10 @@
 #define BTS_PDEV_NAME	"exynos-bts"
 #define ID_DEFAULT	0
 
+#if IS_ENABLED(CONFIG_SOC_S5E8845)
+#define BTS_DNC0	23
+#define BTS_DNC1	24
+#endif
 #define BTSDBG_LOG(x...)	if (btsdbg_log)	dev_notice(x)
 
 static bool btsdbg_log = false;
@@ -366,7 +370,10 @@ int bts_change_mo(unsigned int scen, unsigned int ip,
 						__func__, ip);
 		}
 	}
-
+#if IS_ENABLED(CONFIG_SOC_S5E8845)
+	if (ip == BTS_DNC0 || ip == BTS_DNC1)
+		goto out;
+#endif
 	pr_info("%s: scenario:%d, ip: %d, rmo: %d -> %d, wmo: %d -> %d\n",
 			__func__, scen, ip, old_rmo, rmo, old_wmo, wmo);
 out:

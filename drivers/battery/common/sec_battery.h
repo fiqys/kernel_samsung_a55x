@@ -1289,6 +1289,7 @@ struct sec_battery_info {
 #endif
 	bool is_otg_on;
 	bool smart_sw_src;
+	bool aging_check_done;	/* default false, maintain true once sec_bat_aging_check done */
 };
 
 enum {

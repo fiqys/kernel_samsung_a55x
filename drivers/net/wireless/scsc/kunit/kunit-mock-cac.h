@@ -5,7 +5,6 @@
 
 #include "../cac.h"
 
-#define cac_ctrl_delete_tspec(args...)		kunit_mock_cac_ctrl_delete_tspec(args)
 #define cac_ctrl_config_tspec(args...)		kunit_mock_cac_ctrl_config_tspec(args)
 #define cac_get_active_tspecs(args...)		kunit_mock_cac_get_active_tspecs(args)
 #define cac_ctrl_create_tspec(args...)		kunit_mock_cac_ctrl_create_tspec(args)
@@ -15,11 +14,6 @@
 #define cac_ctrl_send_addts(args...)		kunit_mock_cac_ctrl_send_addts(args)
 #define cac_ctrl_send_delts(args...)		kunit_mock_cac_ctrl_send_delts(args)
 
-
-static int kunit_mock_cac_ctrl_delete_tspec(struct slsi_dev *sdev, char *args)
-{
-	return 0;
-}
 
 static int kunit_mock_cac_ctrl_config_tspec(struct slsi_dev *sdev, char *args)
 {

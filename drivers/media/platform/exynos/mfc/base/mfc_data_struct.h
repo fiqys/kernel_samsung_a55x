@@ -83,6 +83,8 @@
 #define MFC_MAX_MB_TABLE		30
 /* the number of priority is 2N(num of OPP) + 2 */
 #define MFC_MAX_PRIO			12
+/* The number of display DRC max frames that can occur continuously in NAL_Q */
+#define MFC_MAX_DRC_FRAME		MFC_MAX_BUFFERS
 
 /* The last number of the standard(MFC_REG_CODEC_BPG_ENC) supported by MFC + 1 */
 #define MFC_MAX_CODEC_TYPE		(33 + 1)
@@ -197,6 +199,7 @@ enum mfc_inst_state {
 	MFCINST_ABORT,
 	MFCINST_RES_CHANGE_INIT,
 	MFCINST_RES_CHANGE_FLUSH,
+	MFCINST_RES_CHANGE_FLUSH_FINISHED,
 	MFCINST_RES_CHANGE_END,
 	MFCINST_FINISHED,
 	MFCINST_ABORT_INST,
@@ -2339,7 +2342,6 @@ struct mfc_mb_control {
 	struct list_head list;
 	unsigned long mb_per_sec;
 	unsigned int fps;
-	unsigned long not_coded;
 };
 
 struct dpb_table {
@@ -2354,6 +2356,14 @@ struct dpb_table {
 	struct dma_buf *dmabufs[MFC_MAX_PLANES];
 	struct dma_buf_attachment *attach[MFC_MAX_PLANES];
 	struct sg_table *sgt[MFC_MAX_PLANES];
+};
+
+struct disp_drc_info {
+	int disp_res_change;
+	int push_idx;
+	int pop_idx;
+	int width[MFC_MAX_DRC_FRAME];
+	int height[MFC_MAX_DRC_FRAME];
 };
 
 struct mfc_dec {
@@ -2371,7 +2381,7 @@ struct mfc_dec {
 	int is_mbaff;
 	int is_dts_mode;
 	int inter_res_change;
-	int disp_res_change;
+	struct disp_drc_info disp_drc;
 
 	int crc_enable;
 	unsigned int *crc;
@@ -2702,6 +2712,9 @@ struct mfc_ctx {
 	spinlock_t		meminfo_queue_lock;
 	struct mfc_meminfo	meminfo[MFC_MEMINFO_MAX_NUM];
 	size_t			meminfo_size[MFC_MEMINFO_CTX_MAX + 1];
+
+	/* DRC (Display Resolution Change) */
+	u32 handle_drc_multi_mode;
 };
 
 struct mfc_core_ctx {
@@ -2720,12 +2733,15 @@ struct mfc_core_ctx {
 
 	int is_plugin;
 
+	bool fg_sent_cmd;
+
 	struct mfc_buf_queue src_buf_queue;
 	struct mfc_buf_queue dst_buf_queue;
 	spinlock_t buf_queue_lock;
 	unsigned long dynamic_set;
 
 	enum mfc_inst_state state;
+	enum mfc_inst_state prev_state;
 
 	/* QoS */
 	struct list_head qos_list;
@@ -2736,8 +2752,13 @@ struct mfc_core_ctx {
 	int mb_index;
 	int mb_is_full;
 	long dynamic_weight_mb;
+	unsigned int dynamic_weight_started;
 	int mb_update_time;
 	unsigned int avg_runtime;
+	unsigned long mb_not_coded_time;
+	u64 mb_not_coded_mode1_time;
+	ktime_t mb_begin;
+	ktime_t mb_end;
 
 	/* Extra Buffers */
 	int codec_buffer_allocated;

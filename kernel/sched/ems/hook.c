@@ -329,11 +329,23 @@ static void ems_hook_binder_transaction_received(void *data, struct binder_trans
 	ems_binder_task(current) = 0;
 }
 
+#define BINDER_ONE_WAY 0x01
 static void ems_hook_binder_set_priority(void *data, struct binder_transaction *t,
 		struct task_struct *p)
 {
-	if (t && t->need_reply && is_boosted_tex_task(current))
+	bool oneway = !!(t->flags & BINDER_ONE_WAY);
+
+	if (t && !oneway && is_boosted_tex_task(current))
 		ems_boosted_tex(p) = 1;
+
+	if (t && oneway) {
+		if ((is_top_app_task(current) && is_rt_task(p->group_leader)) ||
+				(is_top_app_task(p) && is_rt_task(current->group_leader)))
+			ems_binder_task(p) = 1;
+
+		if (current->signal && is_important_task(current))
+			ems_binder_task(p) = 1;
+	}
 }
 
 static void ems_hook_binder_restore_priority(void *data, struct binder_transaction *t,
