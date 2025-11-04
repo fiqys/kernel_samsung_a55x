@@ -452,38 +452,6 @@ static void test_slsi_procfs_send_delts_write(struct kunit *test)
 	KUNIT_EXPECT_NE(test, 0, slsi_procfs_send_delts_write(fp, user_buf, 10, &ppos));
 }
 
-static void test_slsi_procfs_del_tspec_read(struct kunit *test)
-{
-	struct file *fp = kunit_kzalloc(test, sizeof(struct file), GFP_KERNEL);
-	struct slsi_dev *sdev = TEST_TO_SDEV(test);
-	char __user user_buf[10];
-	loff_t ppos = 0;
-	int iface;
-
-	fp->private_data = (void *)sdev;
-	sdev->current_tspec_id = 0;
-
-	KUNIT_EXPECT_NE(test, 0, slsi_procfs_del_tspec_read(fp, user_buf, 10, &ppos));
-}
-
-static void test_slsi_procfs_del_tspec_write(struct kunit *test)
-{
-	struct file *fp = kunit_kzalloc(test, sizeof(struct file), GFP_KERNEL);
-	struct slsi_dev *sdev = TEST_TO_SDEV(test);
-	char __user user_buf[10];
-	loff_t ppos = 0;
-	int iface;
-
-	fp->private_data = (void *)sdev;
-
-	strcpy(user_buf, "kunit");
-	KUNIT_EXPECT_NE(test, 0, slsi_procfs_del_tspec_write(fp, user_buf, 10, &ppos));
-
-	strcpy(user_buf, "10");
-	ppos = 0;
-	KUNIT_EXPECT_NE(test, 0, slsi_procfs_del_tspec_write(fp, user_buf, 10, &ppos));
-}
-
 static void test_slsi_procfs_tput_read(struct kunit *test)
 {
 	struct file *fp = kunit_kzalloc(test, sizeof(struct file), GFP_KERNEL);
@@ -735,8 +703,6 @@ static struct kunit_case procfs_test_cases[] = {
 	KUNIT_CASE(test_slsi_procfs_send_addts_write),
 	KUNIT_CASE(test_slsi_procfs_send_delts_read),
 	KUNIT_CASE(test_slsi_procfs_send_delts_write),
-	KUNIT_CASE(test_slsi_procfs_del_tspec_read),
-	KUNIT_CASE(test_slsi_procfs_del_tspec_write),
 	KUNIT_CASE(test_slsi_procfs_tput_read),
 	KUNIT_CASE(test_slsi_procfs_tput_write),
 	KUNIT_CASE(test_slsi_procfs_inc_node),

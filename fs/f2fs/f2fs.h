@@ -3473,6 +3473,25 @@ static inline int f2fs_compressed_file(struct inode *inode)
 		is_inode_flag_set(inode, FI_COMPRESSED_FILE);
 }
 
+/* @fs.sec -- fd1a06df23c47fe03098257781122eda -- */
+
+static inline bool f2fs_has_compressed_data(struct inode *inode)
+{
+	if (!f2fs_compressed_file(inode))
+		return false;
+
+	if (F2FS_OPTION(F2FS_I_SB(inode)).compress_mode == COMPR_MODE_FS)
+		return true;
+
+	if (is_inode_flag_set(inode, FI_COMPRESS_RELEASED))
+		return true;
+
+	if (atomic_read(&F2FS_I(inode)->i_compr_blocks))
+		return true;
+
+	return false;
+}
+
 static inline bool f2fs_need_compress_data(struct inode *inode)
 {
 	int compress_mode = F2FS_OPTION(F2FS_I_SB(inode)).compress_mode;

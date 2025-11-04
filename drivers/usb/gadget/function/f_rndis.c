@@ -72,6 +72,7 @@
 #define RNDIS_UL_MAX_PKT_PER_XFER 10
 
 extern struct rndis_multipacket g_rndis_mp;
+extern int host_detect;
 
 struct f_rndis {
 	struct gether			port;
@@ -930,7 +931,11 @@ static void rndis_free_inst(struct usb_function_instance *f)
 	opts = container_of(f, struct f_rndis_opts, func_inst);
 	if (!opts->borrowed_net) {
 		if (opts->bound)
-			gether_cleanup(netdev_priv(opts->net));
+			if (host_detect == 1) {
+				pr_info("%s skip gether_cleanup\n", __func__);
+				host_detect = 0;
+			} else
+				gether_cleanup(netdev_priv(opts->net));
 		else
 			free_netdev(opts->net);
 	}

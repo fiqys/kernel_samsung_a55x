@@ -554,6 +554,8 @@ static u64 update_triggers(struct psi_group *group, u64 now)
 		if (now < t->last_event_time + t->win.size)
 			continue;
 
+		trace_android_vh_psi_event(t);
+
 		if ((t->win.size >= MONITOR_WINDOW_MIN_NS) &&
 		    (t->threshold >= MONITOR_THRESHOLD_MIN_NS))
 			printk_deferred("psi: %s %llu %llu %d %llu %llu\n", __func__, now,

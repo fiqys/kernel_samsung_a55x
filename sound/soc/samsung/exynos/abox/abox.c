@@ -472,7 +472,7 @@ static int abox_ipc_queue_get(struct abox_data *data, struct abox_ipc *ipc)
 	return ret;
 }
 
-static bool abox_can_calliope_ipc(struct device *dev,
+bool abox_can_calliope_ipc(struct device *dev,
 		struct abox_data *data)
 {
 	bool ret = true;
@@ -3645,6 +3645,11 @@ static int abox_enable(struct device *dev)
 		goto error;
 	}
 
+	if (!data->cmpnt || !data->cmpnt->card->snd_card) {
+		abox_warn(dev, "sound card has not been created yet\n");
+		goto error;
+	}
+
 	abox_set_boost_qos(data);
 
 	if (abox_test_quirk(data, ABOX_QUIRK_BIT_ARAM_MODE))
@@ -4534,7 +4539,6 @@ static int samsung_abox_probe(struct platform_device *pdev)
 		of_property_read_string_index(np, "samsung,conf-file-name", i, &data->file_name[i]);
 		dev_info(dev, "conf file[%d]: %s\n", i, data->file_name[i]);
 	}
-
 
 	abox_memlog_register(data);
 	abox_sysevent_register(data);

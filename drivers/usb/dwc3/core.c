@@ -52,6 +52,9 @@ EXPORT_SYMBOL_GPL(ANDROID_GKI_struct_dwc3);
 
 #define DWC3_DEFAULT_AUTOSUSPEND_DELAY	5000 /* ms */
 
+int host_detect;
+EXPORT_SYMBOL_GPL(host_detect);
+
 /**
  * dwc3_get_dr_mode - Validates and sets dr_mode
  * @dwc: pointer to our context structure
@@ -250,6 +253,7 @@ static void __dwc3_set_mode(struct work_struct *work)
 	switch (desired_dr_role) {
 	case DWC3_GCTL_PRTCAP_HOST:
 		pr_info("%s: dwc3_host_init!\n", __func__);
+		host_detect = 1;
 		ret = dwc3_host_init(dwc);
 		if (ret) {
 			dev_err(dwc->dev, "failed to initialize host\n");
@@ -957,6 +961,8 @@ static void dwc3_core_exit(struct dwc3 *dwc)
 	pr_info("%s called\n", __func__);
 	if (!run_stop_fail)
 		dwc3_event_buffers_cleanup(dwc);
+
+	dwc3_event_buffers_cleanup(dwc);
 
 	usb_phy_set_suspend(dwc->usb2_phy, 1);
 	usb_phy_set_suspend(dwc->usb3_phy, 1);
@@ -2024,8 +2030,8 @@ static int dwc3_probe(struct platform_device *pdev)
 	struct device		*dev = &pdev->dev;
 	struct resource		*res, dwc_res;
 	unsigned int		hw_mode;
-	int			time = 0;
 	struct dwc3		*dwc;
+	int			time = 0;
 	struct dwc3_vendor	*vdwc;
 
 	int			ret;

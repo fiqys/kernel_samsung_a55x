@@ -354,6 +354,8 @@ static int __mfc_force_close_inst(struct mfc_core *core, struct mfc_ctx *ctx)
 {
 	struct mfc_core_ctx *core_ctx = core->core_ctx[ctx->num];
 	enum mfc_inst_state prev_state;
+	struct mfc_dec *dec = ctx->dec_priv;
+	struct mfc_dev *dev = core->dev;
 
 	if (core_ctx->state == MFCINST_FREE)
 		return 0;
@@ -379,6 +381,18 @@ static int __mfc_force_close_inst(struct mfc_core *core, struct mfc_ctx *ctx)
 
 	/* Free resources */
 	mfc_release_instance_context(core_ctx);
+
+	if (MFC_FEATURE_SUPPORT(dev, dev->pdata->metadata_interface))
+		mfc_release_metadata_buffer(ctx);
+
+	if (dec->hdr10_plus_full)
+		vfree(dec->hdr10_plus_full);
+
+	if (dec->hdr10_plus_info)
+		vfree(dec->hdr10_plus_info);
+
+	if (dec->av1_film_grain_info)
+		vfree(dec->av1_film_grain_info);
 
 	return 0;
 }
@@ -843,7 +857,6 @@ static void __mfc_core_cancel_drc(struct mfc_core *core, struct mfc_core_ctx *co
 	mfc_info("[DRC] DRC is running yet (state: %d) cancel DRC\n", core_ctx->state);
 
 	mutex_lock(&ctx->drc_wait_mutex);
-	mfc_change_state(core_ctx, MFCINST_RES_CHANGE_END);
 
 	ctx->wait_state &= ~(WAIT_STOP);
 	mfc_debug(2, "clear WAIT_STOP %d\n", ctx->wait_state);
@@ -878,7 +891,8 @@ void mfc_core_instance_dpb_flush(struct mfc_core *core, struct mfc_ctx *ctx)
 	}
 
 	if (core_ctx->state == MFCINST_RES_CHANGE_INIT ||
-			core_ctx->state == MFCINST_RES_CHANGE_FLUSH)
+			core_ctx->state == MFCINST_RES_CHANGE_FLUSH ||
+			core_ctx->state == MFCINST_RES_CHANGE_FLUSH_FINISHED)
 		__mfc_core_cancel_drc(core, core_ctx);
 
 	mfc_cleanup_queue(&ctx->buf_queue_lock, &ctx->dst_buf_queue);
@@ -989,7 +1003,8 @@ void mfc_core_instance_csd_parsing(struct mfc_core *core, struct mfc_ctx *ctx)
 	}
 
 	if (core_ctx->state == MFCINST_RES_CHANGE_INIT ||
-			core_ctx->state == MFCINST_RES_CHANGE_FLUSH)
+			core_ctx->state == MFCINST_RES_CHANGE_FLUSH ||
+			core_ctx->state == MFCINST_RES_CHANGE_FLUSH_FINISHED)
 		__mfc_core_cancel_drc(core, core_ctx);
 
 	/* Header parsed buffer is in src_buf_ready_queue */

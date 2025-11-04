@@ -12,9 +12,10 @@
 #include "mlme.h"
 
 #define SLSI_INI_CONFIG_BUFF_SIZE            1024
-#define SET_HIGHEST_BYTE                     -1
+#define SET_HIGHEST_BYTE                     0
 #define SLSI_INI_KEY_LEN_MAX                 1000
 #define SLSI_INI_TRY_FALLBACK                1
+#define SET_LEAST_SIGNIFICANT_BYTE           -1
 
 #define INI_CONFIG_FILE_PATH            "../firmware/wlan-connection-roaming.ini"
 #define INI_CONFIG_FILE_BACKUP_PATH     "../firmware/wlan-connection-roaming-backup.ini"
@@ -226,6 +227,7 @@ static int encode_mib_octet_with_2indices(struct slsi_dev *sdev, u8 *buf, u16 *p
 	u32 value_int = 0;
 	int res = 0;
 	struct slsi_mib_entry v = {0};
+	struct sk_buff *cfm = NULL;
 
 	if (!value) {
 		SLSI_ERR_NODEV("value points to null\n");
@@ -273,7 +275,7 @@ static int encode_mib_octet_with_2indices(struct slsi_dev *sdev, u8 *buf, u16 *p
 	if (octet_index > mib_val_local.dataLength - 1)
 		goto exit_with_value;
 
-	mib_val_local.data[octet_index] &= value_int & 0xFF;
+	mib_val_local.data[octet_index] = value_int & 0xFF;
 
 	memset(&v, 0x00, sizeof(struct slsi_mib_entry));
 	v.psid = psid;
@@ -292,9 +294,18 @@ static int encode_mib_octet_with_2indices(struct slsi_dev *sdev, u8 *buf, u16 *p
 		SLSI_ERR_NODEV("Failed to encode mib with psid = %d\n", psid);
 		goto exit_with_value;
 	}
+	cfm = slsi_mlme_set_with_cfm(sdev, NULL, mib_val_set.data,
+				     mib_val_set.dataLength);
 
-	append_mibdata_to_buffer(sdev, buf, pos, mib_val_set.data, mib_val_set.dataLength);
+	if (fapi_get_datalen(cfm)) {
+		SLSI_ERR(sdev, "Err Setting MIB failed.\n");
+		log_failed_psids(sdev, fapi_get_data(cfm), fapi_get_datalen(cfm));
+	} else {
+		SLSI_INFO(sdev, "setting MIB successfully\n");
+	}
 
+
+	kfree_skb(cfm);
 	kfree(mib_val_set.data);
 
 exit_with_value:
@@ -374,7 +385,7 @@ static int encode_mib_band1_rssi_factor_score1(struct slsi_dev *sdev, u8 *buf, u
 {
 	int error = SLSI_MIB_STATUS_FAILURE;
 
-	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 1, 0,
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 1, SET_LEAST_SIGNIFICANT_BYTE,
 					       lookup_entry->psid, lookup_entry->unit_con_factor);
 	if (error)
 		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
@@ -387,7 +398,7 @@ static int encode_mib_band1_rssi_factor_score2(struct slsi_dev *sdev, u8 *buf, u
 {
 	int error = SLSI_MIB_STATUS_FAILURE;
 
-	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 2, 0,
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 2, SET_LEAST_SIGNIFICANT_BYTE,
 					       lookup_entry->psid, lookup_entry->unit_con_factor);
 	if (error)
 		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
@@ -400,7 +411,7 @@ static int encode_mib_band1_rssi_factor_score3(struct slsi_dev *sdev, u8 *buf, u
 {
 	int error = SLSI_MIB_STATUS_FAILURE;
 
-	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 3, 0,
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 3, SET_LEAST_SIGNIFICANT_BYTE,
 					       lookup_entry->psid, lookup_entry->unit_con_factor);
 	if (error)
 		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
@@ -413,7 +424,7 @@ static int encode_mib_band1_rssi_factor_score4(struct slsi_dev *sdev, u8 *buf, u
 {
 	int error = SLSI_MIB_STATUS_FAILURE;
 
-	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 4, 0,
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 4, SET_LEAST_SIGNIFICANT_BYTE,
 					       lookup_entry->psid, lookup_entry->unit_con_factor);
 	if (error)
 		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
@@ -426,7 +437,7 @@ static int encode_mib_band1_rssi_factor_score5(struct slsi_dev *sdev, u8 *buf, u
 {
 	int error = SLSI_MIB_STATUS_FAILURE;
 
-	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 5, 0,
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 5, SET_LEAST_SIGNIFICANT_BYTE,
 					       lookup_entry->psid, lookup_entry->unit_con_factor);
 	if (error)
 		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
@@ -504,7 +515,7 @@ static int encode_mib_band2_rssi_factor_score1(struct slsi_dev *sdev, u8 *buf, u
 {
 	int error = SLSI_MIB_STATUS_FAILURE;
 
-	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 1, 0,
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 1, SET_LEAST_SIGNIFICANT_BYTE,
 					       lookup_entry->psid, lookup_entry->unit_con_factor);
 	if (error)
 		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
@@ -517,7 +528,7 @@ static int encode_mib_band2_rssi_factor_score2(struct slsi_dev *sdev, u8 *buf, u
 {
 	int error = SLSI_MIB_STATUS_FAILURE;
 
-	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 2, 0,
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 2, SET_LEAST_SIGNIFICANT_BYTE,
 					       lookup_entry->psid, lookup_entry->unit_con_factor);
 	if (error)
 		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
@@ -530,7 +541,7 @@ static int encode_mib_band2_rssi_factor_score3(struct slsi_dev *sdev, u8 *buf, u
 {
 	int error = SLSI_MIB_STATUS_FAILURE;
 
-	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 3, 0,
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 3, SET_LEAST_SIGNIFICANT_BYTE,
 					       lookup_entry->psid, lookup_entry->unit_con_factor);
 	if (error)
 		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
@@ -543,7 +554,7 @@ static int encode_mib_band2_rssi_factor_score4(struct slsi_dev *sdev, u8 *buf, u
 {
 	int error = SLSI_MIB_STATUS_FAILURE;
 
-	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 4, 0,
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 4, SET_LEAST_SIGNIFICANT_BYTE,
 					       lookup_entry->psid, lookup_entry->unit_con_factor);
 	if (error)
 		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
@@ -556,7 +567,7 @@ static int encode_mib_band2_rssi_factor_score5(struct slsi_dev *sdev, u8 *buf, u
 {
 	int error = SLSI_MIB_STATUS_FAILURE;
 
-	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 5, 0,
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 5, SET_LEAST_SIGNIFICANT_BYTE,
 					       lookup_entry->psid, lookup_entry->unit_con_factor);
 	if (error)
 		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
@@ -621,7 +632,7 @@ static int encode_mib_band3_rssi_factor_score1(struct slsi_dev *sdev, u8 *buf, u
 {
 	int error = SLSI_MIB_STATUS_FAILURE;
 
-	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 1, 0,
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 1, SET_LEAST_SIGNIFICANT_BYTE,
 					       lookup_entry->psid, lookup_entry->unit_con_factor);
 	if (error)
 		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
@@ -634,7 +645,7 @@ static int encode_mib_band3_rssi_factor_score2(struct slsi_dev *sdev, u8 *buf, u
 {
 	int error = SLSI_MIB_STATUS_FAILURE;
 
-	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 2, 0,
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 2, SET_LEAST_SIGNIFICANT_BYTE,
 					       lookup_entry->psid, lookup_entry->unit_con_factor);
 	if (error)
 		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
@@ -647,7 +658,7 @@ static int encode_mib_band3_rssi_factor_score3(struct slsi_dev *sdev, u8 *buf, u
 {
 	int error = SLSI_MIB_STATUS_FAILURE;
 
-	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 3, 0,
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 3, SET_LEAST_SIGNIFICANT_BYTE,
 					       lookup_entry->psid, lookup_entry->unit_con_factor);
 	if (error)
 		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
@@ -660,8 +671,61 @@ static int encode_mib_band3_rssi_factor_score4(struct slsi_dev *sdev, u8 *buf, u
 {
 	int error = SLSI_MIB_STATUS_FAILURE;
 
-	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 4, 0,
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 4, SET_LEAST_SIGNIFICANT_BYTE,
 					       lookup_entry->psid, lookup_entry->unit_con_factor);
+	if (error)
+		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
+
+	return error;
+}
+
+static int encode_mib_band_cu_factor_value1(struct slsi_dev *sdev, u8 *buf, u16 *pos, u8 *value,
+					       struct ini_lookup *lookup_entry)
+{
+	int error = SLSI_MIB_STATUS_FAILURE;
+
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 1, SET_HIGHEST_BYTE,
+					       lookup_entry->psid, lookup_entry->unit_con_factor);
+	if (error)
+		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
+
+	return error;
+}
+
+static int encode_mib_band_cu_factor_value2(struct slsi_dev *sdev, u8 *buf, u16 *pos, u8 *value,
+					       struct ini_lookup *lookup_entry)
+{
+	int error = SLSI_MIB_STATUS_FAILURE;
+
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 2, SET_HIGHEST_BYTE,
+					       lookup_entry->psid, lookup_entry->unit_con_factor);
+	if (error)
+		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
+
+	return error;
+}
+
+
+static int encode_mib_band_cu_factor_score1(struct slsi_dev *sdev, u8 *buf, u16 *pos, u8 *value,
+							   struct ini_lookup *lookup_entry)
+{
+	int error = SLSI_MIB_STATUS_FAILURE;
+
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 1, 1,
+						   lookup_entry->psid, lookup_entry->unit_con_factor);
+	if (error)
+		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
+
+	return error;
+}
+
+static int encode_mib_band_cu_factor_score2(struct slsi_dev *sdev, u8 *buf, u16 *pos, u8 *value,
+							   struct ini_lookup *lookup_entry)
+{
+	int error = SLSI_MIB_STATUS_FAILURE;
+
+	error = encode_mib_octet_with_2indices(sdev, buf, pos, value, lookup_entry->index, 3, 1,
+						   lookup_entry->psid, lookup_entry->unit_con_factor);
 	if (error)
 		SLSI_ERR_NODEV("Err Setting MIB %s failed. error = %d\n", lookup_entry->key, error);
 
@@ -896,6 +960,30 @@ struct ini_lookup slsi_ini_config_lookup_table[] = {
 	 .psid = -100, .index = 0, .unit_con_factor = 1, .min_value = -90, .max_value = -60},
 	{.key = "RoamWTC_6GCandiRSSIThreshold", .func_p = save_roam_wtc_6g_candi_rssi_threshold,
 	 .psid = -100, .index = 0, .unit_con_factor = 1, .min_value = -90, .max_value = -60},
+	{.key = "RoamAPScore_Band1_CUFactorValue1", .func_p = encode_mib_band_cu_factor_value1, .psid = 2295,
+	 .index = 1, .unit_con_factor = 1, .min_value = 0, .max_value = 100},
+	{.key = "RoamAPScore_Band1_CUFactorValue2", .func_p = encode_mib_band_cu_factor_value2, .psid = 2295,
+	 .index = 1, .unit_con_factor = 1, .min_value = 0, .max_value = 100},
+	{.key = "RoamAPScore_Band1_CUFactorScore1", .func_p = encode_mib_band_cu_factor_score1, .psid = 2295,
+	 .index = 1, .unit_con_factor = 1, .min_value = 0, .max_value = 100},
+	{.key = "RoamAPScore_Band1_CUFactorScore2", .func_p = encode_mib_band_cu_factor_score2, .psid = 2295,
+	 .index = 1, .unit_con_factor = 1, .min_value = 0, .max_value = 100},
+	{.key = "RoamAPScore_Band2_CUFactorValue1", .func_p = encode_mib_band_cu_factor_value1, .psid = 2295,
+	 .index = 2, .unit_con_factor = 1, .min_value = 0, .max_value = 100},
+	{.key = "RoamAPScore_Band2_CUFactorValue2", .func_p = encode_mib_band_cu_factor_value2, .psid = 2295,
+	 .index = 2, .unit_con_factor = 1, .min_value = 0, .max_value = 100},
+	{.key = "RoamAPScore_Band2_CUFactorScore1", .func_p = encode_mib_band_cu_factor_score1, .psid = 2295,
+	 .index = 2, .unit_con_factor = 1, .min_value = 0, .max_value = 100},
+	{.key = "RoamAPScore_Band2_CUFactorScore2", .func_p = encode_mib_band_cu_factor_score2, .psid = 2295,
+	 .index = 2, .unit_con_factor = 1, .min_value = 0, .max_value = 100},
+	{.key = "RoamAPScore_Band3_CUFactorValue1", .func_p = encode_mib_band_cu_factor_value1, .psid = 2295,
+	 .index = 3, .unit_con_factor = 1, .min_value = 0, .max_value = 100},
+	{.key = "RoamAPScore_Band3_CUFactorValue2", .func_p = encode_mib_band_cu_factor_value2, .psid = 2295,
+	 .index = 3, .unit_con_factor = 1, .min_value = 0, .max_value = 100},
+	{.key = "RoamAPScore_Band3_CUFactorScore1", .func_p = encode_mib_band_cu_factor_score1, .psid = 2295,
+	 .index = 3, .unit_con_factor = 1, .min_value = 0, .max_value = 100},
+	{.key = "RoamAPScore_Band3_CUFactorScore2", .func_p = encode_mib_band_cu_factor_score2, .psid = 2295,
+	 .index = 3, .unit_con_factor = 1, .min_value = 0, .max_value = 100},
 	{.key = "RoamAPScore_Band3_RSSIFactorValue1", .func_p = encode_mib_band3_rssi_factor_value1, .psid = 2306,
 	 .index = 3, .unit_con_factor = 1, .min_value = -100, .max_value = -50},
 	{.key = "RoamAPScore_Band3_RSSIFactorValue2", .func_p = encode_mib_band3_rssi_factor_value2, .psid = 2306,
@@ -905,13 +993,13 @@ struct ini_lookup slsi_ini_config_lookup_table[] = {
 	{.key = "RoamAPScore_Band3_RSSIFactorValue4", .func_p = encode_mib_band3_rssi_factor_value4, .psid = 2306,
 	 .index = 3, .unit_con_factor = 1, .min_value = -100, .max_value = -50},
 	{.key = "RoamAPScore_Band3_RSSIFactorScore1", .func_p = encode_mib_band3_rssi_factor_score1, .psid = 2306,
-	 .index = 3, .unit_con_factor = 1, .min_value = 0, .max_value = 100},
+	 .index = 3, .unit_con_factor = 1, .min_value = 0, .max_value = 120},
 	{.key = "RoamAPScore_Band3_RSSIFactorScore2", .func_p = encode_mib_band3_rssi_factor_score2, .psid = 2306,
-	 .index = 3, .unit_con_factor = 1, .min_value = 0, .max_value = 100},
+	 .index = 3, .unit_con_factor = 1, .min_value = 0, .max_value = 120},
 	{.key = "RoamAPScore_Band3_RSSIFactorScore3", .func_p = encode_mib_band3_rssi_factor_score3, .psid = 2306,
-	 .index = 3, .unit_con_factor = 1, .min_value = 0, .max_value = 100},
+	 .index = 3, .unit_con_factor = 1, .min_value = 0, .max_value = 120},
 	{.key = "RoamAPScore_Band3_RSSIFactorScore4", .func_p = encode_mib_band3_rssi_factor_score4, .psid = 2306,
-	 .index = 3, .unit_con_factor = 1, .min_value = 0, .max_value = 100},
+	 .index = 3, .unit_con_factor = 1, .min_value = 0, .max_value = 120},
 	{.key = "ConBeaconLoss_TimeoutOnSleep", .func_p = NULL, .psid = -100, .index = 0,
 	 .unit_con_factor = 1, .min_value = 0, .max_value = 20},
 	{.key = "ConDTIMSkipping_MaxTime", .func_p = NULL, .psid = -100, .index = 0,

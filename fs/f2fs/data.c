@@ -2486,7 +2486,7 @@ static int f2fs_mpage_readpages(struct inode *inode,
 		}
 
 #ifdef CONFIG_F2FS_FS_COMPRESSION
-		if (f2fs_compressed_file(inode)) {
+		if (f2fs_has_compressed_data(inode)) {
 			/* there are remained compressed pages, submit them */
 			if (!f2fs_cluster_can_merge_page(&cc, page->index)) {
 				ret = f2fs_read_multi_pages(&cc, &bio,
@@ -2541,7 +2541,7 @@ next_page:
 			put_page(page);
 
 #ifdef CONFIG_F2FS_FS_COMPRESSION
-		if (f2fs_compressed_file(inode)) {
+		if (f2fs_has_compressed_data(inode)) {
 			/* last page */
 			if (nr_pages == 1 && !f2fs_cluster_is_empty(&cc)) {
 				ret = f2fs_read_multi_pages(&cc, &bio,
@@ -4346,7 +4346,6 @@ int f2fs_migrate_pinned_file(struct inode *inode)
 	pgoff_t next_pgofs;
 	unsigned int blks_per_sec = BLKS_PER_SEC(sbi);
 	const unsigned int blocksize = blks_to_bytes(inode, 1);
-	loff_t maxbytes = max_file_blocks(inode) << F2FS_BLKSIZE_BITS;
 	int ret = 0;
 
 	cur_lblock = 0;
@@ -4371,8 +4370,8 @@ int f2fs_migrate_pinned_file(struct inode *inode)
 
 		if (!(map.m_flags & F2FS_MAP_FLAGS)) {
 			cur_lblock = next_pgofs;
-			// https://github.com/aosp-mirror/kernel_common/commit/93460febf9b85e459cd52947a6f452b8c86a95bd
-			if (blks_to_bytes(inode, cur_lblock) < maxbytes)
+			if (blks_to_bytes(inode, cur_lblock) <
+			    blks_to_bytes(inode, max_file_blocks(inode)))
 				goto next;
 			return ret;
 		}

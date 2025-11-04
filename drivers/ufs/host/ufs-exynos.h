@@ -233,8 +233,8 @@ struct exynos_ufs {
 
 
 	struct irq_inform vendor_irq;
+	int hcd_irq_affinity;
 	bool skip_flush;
-	u32 irq_affinity;
 };
 
 static inline struct exynos_ufs *to_exynos_ufs(struct ufs_hba *hba)

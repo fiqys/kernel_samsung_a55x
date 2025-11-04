@@ -74,7 +74,7 @@
 #if IS_ENABLED(CONFIG_SOC_S5E8845)
 #define PHSY_VSS_SIZE                   (0x700000)
 #else
- #define PHSY_VSS_SIZE			(SZ_8M)
+#define PHSY_VSS_SIZE			(SZ_8M)
 #endif
 
 #define ABOX_LOG_OFFSET			(0xb00000)
@@ -953,5 +953,12 @@ static inline unsigned long abox_get_waiting_jiffies(bool coarse)
  *
 */
 extern int abox_print_power_usage(struct device *dev, void *data);
+
+/**
+ * abox status check for abox ipc
+ * @param[in]   dev             pointer to struct dev which invokes this API
+ * @param[in]	data		pointer to abox_data structure
+ */
+extern bool abox_can_calliope_ipc(struct device *dev, struct abox_data *data);
 
 #endif /* __SND_SOC_ABOX_H */

@@ -2048,31 +2048,35 @@ exit_with_error:
 
 int slsi_netif_dynamic_iface_add(struct slsi_dev *sdev, const char *name, enum nl80211_iftype type)
 {
-	int index = -EINVAL;
-	int err;
-	int ifnum;
+	int ifnum = 0;
 
 	SLSI_MUTEX_LOCK(sdev->netdev_add_remove_mutex);
 
-#if defined(CONFIG_SCSC_WLAN_MHS_STATIC_INTERFACE) || (defined(SCSC_SEP_VERSION) && SCSC_SEP_VERSION >= 9)
 	if (type == NL80211_IFTYPE_AP_VLAN) {
 		ifnum = SLSI_NET_INDEX_AP_VLAN + sdev->num_ap_vlan;
-		err = slsi_netif_add_locked(sdev, name, ifnum);
-		index = err ? err : ifnum;
+	} else if (strncmp(name, "wlan2", 5) == 0) {
+		ifnum = SLSI_NET_INDEX_AP;
+	} else if (strncmp(name, "wlan3", 5) == 0) {
+		ifnum = SLSI_NET_INDEX_AP2;
+#if defined(CONFIG_SCSC_WLAN_MHS_STATIC_INTERFACE) || (defined(SCSC_SEP_VERSION) && SCSC_SEP_VERSION >= 9)
 	} else if (sdev->netdev[SLSI_NET_INDEX_P2PX_SWLAN] == sdev->netdev_ap) {
+		ifnum = SLSI_NET_INDEX_P2PX_SWLAN;
 		rcu_assign_pointer(sdev->netdev[SLSI_NET_INDEX_P2PX_SWLAN], NULL);
-		err = slsi_netif_add_locked(sdev, name, SLSI_NET_INDEX_P2PX_SWLAN);
-		index = err ? err : SLSI_NET_INDEX_P2PX_SWLAN;
-	}
-#else
-	ifnum = (type == NL80211_IFTYPE_AP_VLAN) ?
-		(SLSI_NET_INDEX_AP_VLAN + sdev->num_ap_vlan) : SLSI_NET_INDEX_P2PX_SWLAN;
-	err = slsi_netif_add_locked(sdev, name, ifnum);
-	index = err ? err : ifnum;
+		SLSI_INFO(sdev, "Set netdev[SLSI_NET_INDEX_P2PX_SWLAN]=NULL before adding p2p- virtual intf\n");
 #endif
+	} else {
+		ifnum = SLSI_NET_INDEX_P2PX_SWLAN;
+	}
+	SLSI_INFO(sdev, "name:%s (ifnum:%d)\n", name, ifnum);
 
+	if (slsi_netif_add_locked(sdev, name, ifnum) != 0) {
+		SLSI_ERR(sdev, "failed to add with wlan netdev %d\n", ifnum);
+		SLSI_MUTEX_UNLOCK(sdev->netdev_add_remove_mutex);
+		return -EINVAL;
+	}
 	SLSI_MUTEX_UNLOCK(sdev->netdev_add_remove_mutex);
-	return index;
+
+	return ifnum;
 }
 
 int slsi_netif_init(struct slsi_dev *sdev)

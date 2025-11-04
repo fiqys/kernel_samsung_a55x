@@ -347,24 +347,28 @@ bool mfc_qos_mb_calculate(struct mfc_core *core, struct mfc_core_ctx *core_ctx,
 	struct mfc_ctx *ctx = core_ctx->ctx;
 	struct list_head *head = &core_ctx->mb_list;
 	struct mfc_mb_control *temp_mb;
-	struct mfc_mb_control *new_mb = &core_ctx->mb_table[core_ctx->mb_index];
+	struct mfc_mb_control *new_mb;
 	unsigned int avg_fps, need_fps, total_fps = 0;
-	unsigned long hwfw_t, hw_mb, need_mb, avg_mb, base_mb, margin_mb, total_mb = 0;
+	unsigned long hwfw_time, hw_mb, need_mb, avg_mb, base_mb, margin_mb, total_mb = 0;
+	u64 drv_time = 0;
 	long weight;
 	int count = 0;
 	bool update = false;
 
 	if (!core->dev->pdata->dynamic_weight ||
-			core->dev->debugfs.feature_option & MFC_OPTION_USE_FIXED_WEIGHT)
+			(core->dev->debugfs.feature_option & MFC_OPTION_USE_FIXED_WEIGHT))
 		return update;
 
-	if ((ctx->frame_cnt < (MFC_MIN_FPS / 1000)) || (ctx->framerate > MFC_MAX_FPS)) {
+	if ((ctx->frame_cnt < (MFC_MIN_FPS / 1000)) || (ctx->framerate > MFC_MAX_FPS)
+			|| (core->dev->num_inst > 1)) {
 		core_ctx->dynamic_weight_mb = 0;
+		core_ctx->dynamic_weight_started = 0;
 		return update;
 	}
 
 	if (ctx->boosting_time) {
 		core_ctx->dynamic_weight_mb = 0;
+		core_ctx->dynamic_weight_started = 0;
 		mfc_debug(4, "[QoS] seeking boosting\n");
 		return update;
 	}
@@ -376,31 +380,74 @@ bool mfc_qos_mb_calculate(struct mfc_core *core, struct mfc_core_ctx *core_ctx,
 
 	mutex_lock(&core->qos_mutex);
 
+	if (!core_ctx->dynamic_weight_mb && !core_ctx->dynamic_weight_started) {
+		mfc_debug(4, "[QoS] Clear MB list, dynamic mb: %ld, started: %u\n",
+				core_ctx->dynamic_weight_mb, core_ctx->dynamic_weight_started);
+
+		while (!list_empty(head)) {
+			temp_mb = list_entry(head->next, struct mfc_mb_control, list);
+			list_del(&temp_mb->list);
+		}
+
+		core_ctx->mb_index = 0;
+		core_ctx->mb_is_full = 0;
+		core_ctx->mb_not_coded_time = 0;
+		core_ctx->mb_not_coded_mode1_time = 0;
+		core_ctx->dynamic_weight_started = 1;
+		core_ctx->mb_update_time = MFC_MAX_MB_TABLE;
+	}
+
+	new_mb = &core_ctx->mb_table[core_ctx->mb_index];
+
 	/* setup macroblock table list */
-	if (core_ctx->mb_is_full && !new_mb->not_coded) {
+	if (core_ctx->mb_is_full && !core_ctx->mb_not_coded_time) {
 		temp_mb = list_entry(head->next, struct mfc_mb_control, list);
 		list_del(&temp_mb->list);
 	}
 
 	hw_mb = ((ctx->crop_width + 15) / 16) * ((ctx->crop_height + 15) / 16);
-	hwfw_t = processing_cycle / (core->last_mfc_freq / 1000);
-	if (new_mb->not_coded) {
-		hwfw_t += new_mb->not_coded;
-		new_mb->not_coded = 0;
+	hwfw_time = processing_cycle / (core->last_mfc_freq / 1000);
+	if (IS_TWO_MODE1(ctx)) {
+		core_ctx->mb_end = ktime_get();
+		drv_time = ktime_to_us(core_ctx->mb_end) - ktime_to_us(core_ctx->mb_begin);
+	}
+
+	if (core_ctx->mb_not_coded_time) {
+		mfc_debug(4, "[QoS] Add not coded time. %lu + %lu(drv: %llu + %llu)\n",
+				hwfw_time, core_ctx->mb_not_coded_time,
+				drv_time, core_ctx->mb_not_coded_mode1_time);
+		hwfw_time += core_ctx->mb_not_coded_time;
+		drv_time += core_ctx->mb_not_coded_mode1_time;
+		core_ctx->mb_not_coded_time = 0;
+		core_ctx->mb_not_coded_mode1_time = 0;
 	} else {
 		list_add_tail(&new_mb->list, head);
 	}
 
-	if (hwfw_t) {
-		new_mb->mb_per_sec = (1000000 * hw_mb) / hwfw_t;
-		new_mb->fps = 1000000 / hwfw_t;
+	if (frame_type == 0) {
+		mfc_debug(4, "[QoS] Not coded frame type. it accumulated to next frame\n");
+		if (drv_time)
+			core_ctx->mb_not_coded_mode1_time = drv_time;
+		if (hwfw_time)
+			core_ctx->mb_not_coded_time = hwfw_time;
+		else
+			core_ctx->mb_not_coded_time = 1;
+		goto qos_end;
+	}
+
+	if (drv_time) {
+		new_mb->mb_per_sec = (1000000 * hw_mb) / drv_time;
+		new_mb->fps = 1000000 / drv_time;
+	} else if (hwfw_time) {
+		new_mb->mb_per_sec = (1000000 * hw_mb) / hwfw_time;
+		new_mb->fps = 1000000 / hwfw_time;
 	} else {
 		new_mb->mb_per_sec = 0;
 		new_mb->fps = 0;
 	}
 
-	mfc_debug(4, "[QoS] hw_mb: %ld, cycle: %d, t: %ld, mb: %ld, fps: %d, freq: %d\n",
-			hw_mb, processing_cycle, hwfw_t, new_mb->mb_per_sec,
+	mfc_debug(4, "[QoS] hw_mb: %ld, cycle: %d, t: %ld(d:%lld), mb: %ld, fps: %d, freq: %d\n",
+			hw_mb, processing_cycle, hwfw_time, drv_time, new_mb->mb_per_sec,
 			new_mb->fps, core->last_mfc_freq);
 
 	mfc_debug(4, "[QoS] -------------- mb_table (MFC: %dKHz)\n", core->last_mfc_freq);
@@ -417,26 +464,16 @@ bool mfc_qos_mb_calculate(struct mfc_core *core, struct mfc_core_ctx *core_ctx,
 		goto qos_end;
 	}
 
-	if (frame_type == 0) {
-		mfc_debug(2, "[QoS] Not coded frame type. it accumulated to next frame\n");
-		if (hwfw_t)
-			new_mb->not_coded = hwfw_t;
-		else
-			new_mb->not_coded = 1;
-		goto qos_end;
-	}
-
 	core_ctx->mb_index++;
 	if (core_ctx->mb_index == MFC_MAX_MB_TABLE) {
 		core_ctx->mb_is_full = 1;
-		core_ctx->mb_index %= MFC_MAX_MB_TABLE;
+		core_ctx->mb_index = 0;
 	}
 
 	/* Skip additional updates until the changed QoS is reflected */
-	if (core_ctx->mb_update_time) {
+	if (core_ctx->mb_update_time)
 		core_ctx->mb_update_time--;
-		goto qos_end;
-	}
+
 
 	/* Calculate macroblock average */
 	if (ctx->disp_ratio)
@@ -459,37 +496,58 @@ bool mfc_qos_mb_calculate(struct mfc_core *core, struct mfc_core_ctx *core_ctx,
 		margin_mb = need_mb / 2;
 	else if (ctx->type == MFCINST_ENCODER)
 		margin_mb = MFC_MB_PER_TABLE / 2;
-	else if (need_mb > core->core_pdata->max_mb)
+	else if ((need_mb > core->core_pdata->max_mb) ||
+			((ctx->stream_op_mode == MFC_OP_TWO_MODE1 || ctx->stream_op_mode == MFC_OP_TWO_MODE2)
+			&& IS_MFC_MAX_PERF(ctx, need_fps)))
 		margin_mb = MFC_MB_PER_TABLE * core->dev->num_core;
 	else
 		margin_mb = MFC_MB_PER_TABLE;
-	if (avg_mb < need_mb + margin_mb) {
+
+	if (ctx->type == MFCINST_DECODER && (new_mb->mb_per_sec < need_mb + margin_mb)) {
+		base_mb = need_mb + margin_mb;
+		weight = base_mb - new_mb->mb_per_sec;
+		mfc_debug(2, "[QoS] per frame perf is insufficient (weight %ld)\n", weight);
+		update = true;
+	} else if (avg_mb < need_mb + margin_mb) {
 		base_mb = need_mb + margin_mb;
 		weight = base_mb - avg_mb;
 		mfc_debug(2, "[QoS] perf is insufficient (weight %ld)\n", weight);
 		update = true;
 	} else if (avg_mb > need_mb + (2 * margin_mb)) {
-		base_mb = need_mb + (2 * margin_mb);
-		weight = -min(avg_mb - base_mb, margin_mb);
-		mfc_debug(2, "[QoS] perf is enough (weight %ld)\n", weight);
-		update = true;
+		if (!core_ctx->mb_update_time) {
+			base_mb = need_mb + (2 * margin_mb);
+			weight = -min(avg_mb - base_mb, margin_mb);
+			mfc_debug(2, "[QoS] perf is enough (weight %ld)\n", weight);
+			update = true;
+		}
 	} else {
-		mfc_debug(2, "[QoS] perf is suitable\n");
+		if (!core_ctx->mb_update_time)
+			mfc_debug(2, "[QoS] perf is suitable\n");
 	}
 
 	if (update) {
 		/* dynamic_weight_mb is accumulated after first time */
+		if (IS_TWO_MODE1(ctx))
+			need_mb /= core->dev->num_core;
 		if (!core_ctx->dynamic_weight_mb)
-			core_ctx->dynamic_weight_mb = base_mb + weight;
+			core_ctx->dynamic_weight_mb = __mfc_qos_add_weight(ctx, need_mb) + weight;
 		else
 			core_ctx->dynamic_weight_mb += weight;
 
 		/* If dynamic_weight_mb is minus, use need_mb because perf is enough */
 		if (core_ctx->dynamic_weight_mb <= 0)
 			core_ctx->dynamic_weight_mb = need_mb;
+		else if (core_ctx->dynamic_weight_mb > core->core_pdata->max_mb)
+			core_ctx->dynamic_weight_mb = core->core_pdata->max_mb;
 
-		/* Wait until half of the mb_table is updated again */
-		core_ctx->mb_update_time = MFC_MAX_MB_TABLE / 2;
+		while (!list_empty(head)) {
+			temp_mb = list_entry(head->next, struct mfc_mb_control, list);
+			list_del(&temp_mb->list);
+		}
+
+		core_ctx->mb_index = 0;
+		core_ctx->mb_is_full = 0;
+		core_ctx->mb_update_time = MFC_MAX_MB_TABLE;
 		mfc_debug(2, "[QoS] dynamic weight mb: %ld\n", core_ctx->dynamic_weight_mb);
 	}
 
@@ -747,8 +805,13 @@ static inline unsigned long __mfc_qos_get_mb_per_second(struct mfc_core *core,
 			ctx->num, ctx->type == MFCINST_ENCODER ? "ENC" : "DEC",
 			ctx->crop_width, ctx->crop_height, fps, mb, ctx->Kbps);
 
-	if (ctx->boosting_time)
+	if (ctx->boosting_time || ctx->update_framerate) {
 		core_ctx->dynamic_weight_mb = 0;
+		core_ctx->dynamic_weight_started = 0;
+		ctx->dynamic_weight_mb = 0;
+		mfc_debug(4, "[QoS] clear dynamic weight, boost: %s, update_framerate: %d\n",
+			ctx->boosting_time ? "on" : "off", ctx->update_framerate);
+	}
 
 	if (!core_ctx->dynamic_weight_mb || (dev->num_inst > 1)) {
 		mfc_debug(4, "[QoS] fixed weight (hw_mb: %lu)\n", qos_weighted_mb);
@@ -894,7 +957,7 @@ void __mfc_qos_calculate(struct mfc_core *core, struct mfc_ctx *ctx, int delete)
 	unsigned long hw_mb = 0, total_mb = 0, total_fps = 0;
 	int total_bps = 0, mfc_freq_idx;
 	unsigned int fw_time, sw_time;
-	int i, found = 0, dec_found = 0, heif_found = 0;
+	int i, qos_count = 0, found = 0, dec_found = 0, heif_found = 0, slowmotion_found = 0;
 	int table_type = MFC_QOS_TABLE_TYPE_DEFAULT, num_qos_steps;
 #ifdef CONFIG_MFC_USE_BTS
 	struct bts_bw mfc_bw, curr_mfc_bw_ctx;
@@ -920,6 +983,10 @@ void __mfc_qos_calculate(struct mfc_core *core, struct mfc_ctx *ctx, int delete)
 		}
 		if (qos_ctx->is_heif_mode)
 			heif_found += 1;
+		if ((qos_ctx->type == MFCINST_ENCODER) && UNDER_FHD_RES(qos_ctx) &&
+			(qos_ctx->operating_framerate == qos_ctx->framerate) &&
+			(qos_ctx->operating_framerate / 1000 == 240))
+			slowmotion_found += 1;
 
 		if (qos_ctx->type == MFCINST_DECODER)
 			dec_found += 1;
@@ -932,6 +999,7 @@ void __mfc_qos_calculate(struct mfc_core *core, struct mfc_ctx *ctx, int delete)
 		mfc_bw.read += curr_mfc_bw_ctx.read;
 		mfc_bw.write += curr_mfc_bw_ctx.write;
 #endif
+		qos_count++;
 	}
 
 	if (found)
@@ -968,8 +1036,12 @@ void __mfc_qos_calculate(struct mfc_core *core, struct mfc_ctx *ctx, int delete)
 		mfc_ctx_debug(4, "[QoS] overspec mb %ld > %d\n", total_mb, pdata->max_mb);
 
 	/* search the suitable independent mfc freq using bps */
-	mfc_freq_idx = mfc_rate_get_bps_section_by_bps(core->dev, total_bps, core->dev->max_Kbps);
-	core->mfc_freq_by_bps = core->dev->pdata->mfc_freqs[mfc_freq_idx];
+	if (dec_found) {
+		mfc_freq_idx = mfc_rate_get_bps_section_by_bps(core->dev, total_bps, core->dev->max_Kbps);
+		core->mfc_freq_by_bps = core->dev->pdata->mfc_freqs[mfc_freq_idx];
+	} else {
+		core->mfc_freq_by_bps = 0;
+	}
 
 	if (delete && (list_empty(&core->qos_queue) || total_mb == 0)) {
 		if (core->cpu_boost_enable)
@@ -981,6 +1053,9 @@ void __mfc_qos_calculate(struct mfc_core *core, struct mfc_ctx *ctx, int delete)
 			mfc_ctx_debug(2, "[QoS][BOOST] use max level for HEIF\n");
 			if (!core->cpu_boost_enable)
 				__mfc_qos_cpu_boost_enable(core);
+		} else if (slowmotion_found && qos_count == 1) {
+			mfc_ctx_debug(2, "[QoS] use 332MHz for FHD 240fps encoding\n");
+			i = 3;
 		}
 #ifdef CONFIG_MFC_USE_BTS
 		__mfc_qos_set(core, ctx, &mfc_bw, table_type, i);

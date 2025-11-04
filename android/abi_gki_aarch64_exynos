@@ -1083,6 +1083,7 @@
   vmalloc
   vmalloc_to_pfn
   vmap
+  vm_node_stat
   vscnprintf
   vsnprintf
   vunmap
@@ -2169,8 +2170,6 @@
   drm_helper_hpd_irq_event
   drm_is_current_master
   drm_kms_helper_is_poll_worker
-  drm_kms_helper_poll_disable
-  drm_kms_helper_poll_enable
   drm_mm_init
   drm_mm_insert_node_in_range
   drm_mm_print
@@ -2456,7 +2455,6 @@
   sbitmap_queue_min_shallow_depth
   __traceiter_block_rq_insert
   __tracepoint_block_rq_insert
-  vm_node_stat
 
 # required by sysevent.ko
   bus_find_device
@@ -2649,6 +2647,8 @@
   drm_connector_attach_hdr_output_metadata_property
   drm_dev_has_vblank
   drm_edid_to_sad
+  drm_kms_helper_poll_disable
+  drm_kms_helper_poll_enable
   drm_match_cea_mode
   drm_mode_copy
   drm_mode_debug_printmodeline

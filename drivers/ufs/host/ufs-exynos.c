@@ -718,9 +718,6 @@ static int exynos_ufs_init(struct ufs_hba *hba)
 
 	hba->ahit = ufs->ah8_ahit;
 
-	if (!hba->mcq_enabled)
-		ufs_set_affinity(hba->irq, 4);
-
 	return 0;
 }
 
@@ -1578,11 +1575,18 @@ static int __exynos_ufs_suspend(struct ufs_hba *hba, enum ufs_pm_op pm_op,
 static int __exynos_ufs_resume(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 {
 	struct exynos_ufs *ufs = to_exynos_ufs(hba);
+	const struct cpumask *mask_ptr;
 	int ret = 0;
 
 	if (!IS_C_STATE_ON(ufs) ||
 			ufs->h_state != H_SUSPEND)
 		PRINT_STATES(ufs);
+
+	if (ufs->hcd_irq_affinity >= 0) {
+		mask_ptr = irq_get_affinity_mask(hba->irq);
+		if (mask_ptr &&	(mask_ptr->bits[0] != 0x1))
+			ufs_set_affinity(hba->irq, 0);
+	}
 
 	if (ufs->perf)
 		ufs_perf_resume(ufs->perf);
@@ -1760,6 +1764,7 @@ static void exynos_ufs_send_command(void *data, struct ufs_hba *hba, struct ufsh
 {
 	struct exynos_ufs *ufs = to_exynos_ufs(hba);
 	struct ufs_vs_handle *handle = &ufs->handle;
+	const struct cpumask *mask_ptr;
 	ufs_perf_op op = UFS_PERF_OP_NONE;
 	struct ufs_hw_queue *hwq;
 	u32 hwq_num, utag;
@@ -1767,6 +1772,13 @@ static void exynos_ufs_send_command(void *data, struct ufs_hba *hba, struct ufsh
 
 	if (!lrbp)
 		return;
+
+	if (ufs->hcd_irq_affinity >= 0) {
+		mask_ptr = irq_get_affinity_mask(hba->irq);
+		if ((!hba->pm_op_in_progress) &&
+			mask_ptr && (mask_ptr->bits[0] != (1 << ufs->hcd_irq_affinity)))
+			ufs_set_affinity(hba->irq, ufs->hcd_irq_affinity);
+	}
 
 	if (is_mcq_enabled(hba)) {
 		if (lrbp->task_tag != hba->nutrs - UFSHCD_NUM_RESERVED) {
@@ -2229,7 +2241,9 @@ static int exynos_ufs_populate_dt(struct device *dev, struct exynos_ufs *ufs)
 		of_property_read_u8(np, "brd-for-cal", &ufs->cal_param.board);
 	pr_info("%s: board type: %d\n", __func__, ufs->cal_param.board);
 
-	of_property_read_u32(np, "mcq-irq,affinity", &ufs->irq_affinity);
+	/* initate negative value,use hcd_irq_affinity only if it is in dt */
+	ufs->hcd_irq_affinity = -1;
+	of_property_read_u32(np, "ufs,hcd_irq_affinity", &ufs->hcd_irq_affinity);
 
 	/* select cal overwrite */
 	ufs->cal_param.overwrite = 0;
@@ -2932,11 +2946,11 @@ static int exynos_ufs_update_cal_store(struct exynos_ufs *ufs, const char *buf,
 {
 	struct ufs_vs_handle *handle = &ufs->handle;
 	struct ufs_cal_param *p = &ufs->cal_param;
-	char cmd[6];
+	char cmd[7];
 	u32 addr, value;
 	int ret;
 
-	ret = sscanf(buf, "%s %x %x", cmd, &addr, &value);
+	ret = sscanf(buf, "%6s %x %x", cmd, &addr, &value);
 	if (!ret)
 		return -EINVAL;
 

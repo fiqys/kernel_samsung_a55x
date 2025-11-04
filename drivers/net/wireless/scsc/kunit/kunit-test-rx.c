@@ -1480,8 +1480,11 @@ static void test_slsi_set_acl(struct kunit *test)
 	ndev_vif->acl_data_supplicant = kunit_kzalloc(test, sizeof(struct cfg80211_acl_data), GFP_KERNEL);
 	ndev_vif->acl_data_hal = kunit_kzalloc(test, sizeof(struct cfg80211_acl_data), GFP_KERNEL);
 	ndev_vif->acl_data_supplicant->n_acl_entries = 1;
-	ndev_vif->acl_data_hal->n_acl_entries = 1;
 
+	ndev_vif->acl_data_hal->n_acl_entries = -1;
+	KUNIT_EXPECT_EQ(test, -ENOMEM, slsi_set_acl(sdev, dev));
+
+	ndev_vif->acl_data_hal->n_acl_entries = 1;
 	KUNIT_EXPECT_EQ(test, 0, slsi_set_acl(sdev, dev));
 }
 

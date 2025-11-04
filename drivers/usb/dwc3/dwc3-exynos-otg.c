@@ -510,10 +510,20 @@ static int dwc3_otg_start_host(struct otg_fsm *fsm, int on)
 		dwc3_exynos_core_init(dwc, exynos);
 		dwc3_bus_control(exynos, 1);
 
-		dwc3_core_susphy_set(dwc, 1);
-
 		pr_info("%s: usb_role_switch_set_role = DWC3_GCTL_PRTCAP_HOST\n", __func__);
 		usb_role_switch_set_role(dwc->role_sw, DWC3_GCTL_PRTCAP_HOST);
+
+		while (dwc->current_dr_role != DWC3_GCTL_PRTCAP_HOST) {
+			usleep_range(10000, 20000);
+			time += 20;
+			if (time > 500) {
+				pr_info("%s set_mode timeout\n", __func__);
+				break;
+			}
+		}
+		pr_info("%s set_mode time = %d\n", __func__, time);
+
+		dwc3_core_susphy_set(dwc, 1);
 
 		schedule_delayed_work(&g_dwc3_exynos->usb_qos_lock_delayed_work,
 				msecs_to_jiffies(3000));

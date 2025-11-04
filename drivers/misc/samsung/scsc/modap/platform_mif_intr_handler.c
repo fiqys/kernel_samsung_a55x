@@ -9,8 +9,12 @@ void platform_mif_suspend_reg_handler(struct scsc_mif_abs *interface,
 {
 	struct platform_mif *platform = platform_mif_from_mif_abs(interface);
 
+#ifdef CONFIG_SCSC_WLBT_PTR_PRINT
 	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Registering mif suspend/resume handlers in %p %p\n", platform,
 			  interface);
+#else
+	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Registering mif suspend/resume handlers\n");
+#endif
 	platform->suspend_handler = suspend;
 	platform->resume_handler = resume;
 	platform->suspendresume_data = data;
@@ -20,8 +24,12 @@ void platform_mif_suspend_unreg_handler(struct scsc_mif_abs *interface)
 {
 	struct platform_mif *platform = platform_mif_from_mif_abs(interface);
 
+#ifdef CONFIG_SCSC_WLBT_PTR_PRINT
 	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Unregistering mif suspend/resume handlers in %p %p\n", platform,
 			  interface);
+#else
+	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Unregistering mif suspend/resume handlers\n");
+#endif
 	platform->suspend_handler = NULL;
 	platform->resume_handler = NULL;
 	platform->suspendresume_data = NULL;
@@ -33,7 +41,11 @@ void platform_recovery_disabled_reg(struct scsc_mif_abs *interface, bool (*handl
 	struct platform_mif *platform = platform_mif_from_mif_abs(interface);
 	unsigned long flags;
 
+#ifdef CONFIG_SCSC_WLBT_PTR_PRINT
 	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Registering mif recovery %pS\n", handler);
+#else
+	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Registering mif recovery\n");
+#endif
 	spin_lock_irqsave(&platform->mif_spinlock, flags);
 	platform->recovery_disabled = handler;
 	spin_unlock_irqrestore(&platform->mif_spinlock, flags);

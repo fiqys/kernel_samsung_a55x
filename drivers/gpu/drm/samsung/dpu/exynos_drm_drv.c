@@ -1428,10 +1428,27 @@ static void
 exynos_atomic_commit_modeset_disables(struct drm_device *dev,
 				      struct drm_atomic_state *old_state)
 {
+	struct drm_connector *connector;
+	struct drm_connector_state *old_conn_state, *new_conn_state;
+	struct drm_crtc *crtc;
+	int i;
+
 	DPU_ATRACE_BEGIN(__func__);
 	disable_outputs(dev, old_state);
 
 	drm_atomic_helper_update_legacy_modeset_state(dev, old_state);
+	for_each_oldnew_connector_in_state(old_state, connector, old_conn_state, new_conn_state, i) {
+		crtc = new_conn_state->crtc;
+		if ((!crtc && old_conn_state->crtc) ||
+		    (crtc && drm_atomic_crtc_needs_modeset(crtc->state))) {
+			int mode = DRM_MODE_DPMS_OFF;
+
+			if (crtc && drm_atomic_crtc_effectively_active(crtc->state))
+				mode = DRM_MODE_DPMS_ON;
+
+			connector->dpms = mode;
+		}
+	}
 	drm_atomic_helper_calc_timestamping_constants(old_state);
 
 	crtc_set_mode(dev, old_state);

@@ -325,6 +325,33 @@ static inline void parse_cgroup_coregroup_field(struct device_node *dn,
 		parse_coregroup_field(dn, task_cgroup_name[cgroup], field[cgroup], default_value);
 }
 
+static inline void parse_step_coregroup_field(struct device_node *dn, const char *name,
+		int (field)[VENDOR_NR_CPUS][DEFAULT_LATENCY_STEP], int default_value)
+{
+	int count, cpu, cursor, step;
+	unsigned int val[VENDOR_NR_CPUS][DEFAULT_LATENCY_STEP];
+
+	for (count = 0; count < VENDOR_NR_CPUS; count++)
+		for (step = 0; step < DEFAULT_LATENCY_STEP; step++)
+			val[count][step] = default_value;
+
+	count = of_property_count_u32_elems(dn, name);
+	if (count > 0)
+		of_property_read_u32_array(dn, name, (u32 *)&val, count);
+
+	count = 0;
+	for_each_possible_cpu(cpu) {
+		if (cpu != cpumask_first(cpu_clustergroup_mask(cpu)))
+			continue;
+
+		for_each_cpu(cursor, cpu_clustergroup_mask(cpu))
+			for (step = 0; step < DEFAULT_LATENCY_STEP; step++)
+				field[cursor][step] = val[count][step];
+
+		count++;
+	}
+}
+
 static void parse_active_weight(struct device_node *dn, struct emstune_active_weight *active_weight)
 {
 	parse_cgroup_coregroup_field(dn, active_weight->ratio, 100);
@@ -342,10 +369,20 @@ static void parse_freqboost(struct device_node *dn, struct emstune_freqboost *fr
 
 static void parse_cpufreq_gov(struct device_node *dn, struct emstune_cpufreq_gov *cpufreq_gov)
 {
+	if(of_property_read_u32(dn, "step-latency-enable",
+				&cpufreq_gov->step_latency_enable))
+		cpufreq_gov->step_latency_enable = 0;
+	if(of_property_read_u32(dn, "step-margin-enable",
+				&cpufreq_gov->step_margin_enable))
+		cpufreq_gov->step_margin_enable = 0;
 	parse_coregroup_field(dn, "htask-boost", cpufreq_gov->htask_boost, 100);
 	parse_coregroup_field(dn, "pelt-boost", cpufreq_gov->pelt_boost, 0);
 	parse_coregroup_field(dn, "window-count", cpufreq_gov->window_count, 2);
 	parse_coregroup_field(dn, "htask-ratio-threshold", cpufreq_gov->htask_ratio_threshold, 900);
+	parse_coregroup_field(dn, "low-pelt-margin", cpufreq_gov->low_pelt_margin, 0);
+	parse_coregroup_field(dn, "margin-freq", cpufreq_gov->margin_freq, 0);
+	parse_step_coregroup_field(dn, "step-latency-ns", cpufreq_gov->step_latency_ns, 0);
+	parse_step_coregroup_field(dn, "step-latency-freq", cpufreq_gov->step_latency_freq, 0);
 }
 
 #define UPPER_BOUNDARY	0
@@ -585,6 +622,12 @@ enum {
 	freqboost,
 	cpufreq_pelt_boost,
 	cpufreq_htask_boost,
+	cpufreq_step_latency_enable,
+	cpufreq_step_latency_ns,
+	cpufreq_step_latency_freq,
+	cpufreq_step_margin_enable,
+	cpufreq_low_pelt_margin,
+	cpufreq_margin_freq,
 	fclamp_freq,
 	fclamp_period,
 	fclamp_ratio,
@@ -622,6 +665,12 @@ struct aio_tuner_item aio_tuner_items[] = {
 	{ I(freqboost),			CPU_CGROUP,	SIGNED_TYPE,	MAX_RATIO },
 	{ I(cpufreq_pelt_boost),	CPU_ONLY,	SIGNED_TYPE,	MAX_RATIO },
 	{ I(cpufreq_htask_boost),	CPU_ONLY,	SIGNED_TYPE,	MAX_RATIO },
+	{ I(cpufreq_step_latency_enable),	CPU_ONLY,	BOOL_TYPE,	0 },
+	{ I(cpufreq_step_latency_ns),	CPU_ONLY,	UNSIGNED_TYPE,	MAX_RATIO },
+	{ I(cpufreq_step_latency_freq),CPU_ONLY,	UNSIGNED_TYPE,	INT_MAX,},
+	{ I(cpufreq_step_margin_enable),	CPU_ONLY,	BOOL_TYPE,	0 },
+	{ I(cpufreq_low_pelt_margin),	CPU_ONLY,	UNSIGNED_TYPE,	MAX_RATIO },
+	{ I(cpufreq_margin_freq),	CPU_ONLY,	UNSIGNED_TYPE,	INT_MAX,},
 	{ I(fclamp_freq),		CPU_OPTION,	UNSIGNED_TYPE,	INT_MAX, "option:min=0,max=1" },
 	{ I(fclamp_period),		CPU_OPTION,	UNSIGNED_TYPE,	100, "option:min=0,max=1" },
 	{ I(fclamp_ratio), 		CPU_OPTION,	UNSIGNED_TYPE,	1000, "option:min=0,max=1" },
@@ -746,6 +795,18 @@ static void set_value_coregroup_cgroup(int (field)[CGROUP_COUNT][VENDOR_NR_CPUS]
 	} else {
 		for_each_cpu(i, cpu_clustergroup_mask(cpu))
 			field[cgroup][i] = value;
+	}
+}
+
+static void set_value_step_coregroup(int (field)[VENDOR_NR_CPUS][DEFAULT_LATENCY_STEP],
+		int cpu, int value)
+{
+	int i, step;
+
+	for_each_cpu(i, cpu_clustergroup_mask(cpu)) {
+		for (step = 0; step < DEFAULT_LATENCY_STEP; step++) {
+			field[i][step] = value;
+		}
 	}
 }
 
@@ -1137,6 +1198,24 @@ static ssize_t aio_tuner_store(struct device *dev,
 	case cpufreq_pelt_boost:
 		set_value_coregroup(set->cpufreq_gov.pelt_boost, cpu, value);
 		break;
+	case cpufreq_step_latency_enable:
+		set_value_single(&set->cpufreq_gov.step_latency_enable, value);
+		break;
+	case cpufreq_step_latency_ns:
+		set_value_step_coregroup(set->cpufreq_gov.step_latency_ns, cpu, value);
+		break;
+	case cpufreq_step_latency_freq:
+		set_value_step_coregroup(set->cpufreq_gov.step_latency_freq, cpu, value);
+		break;
+	case cpufreq_step_margin_enable:
+		set_value_single(&set->cpufreq_gov.step_margin_enable, value);
+		break;
+	case cpufreq_low_pelt_margin:
+		set_value_coregroup(set->cpufreq_gov.low_pelt_margin, cpu, value);
+		break;
+	case cpufreq_margin_freq:
+		set_value_coregroup(set->cpufreq_gov.margin_freq, cpu, value);
+		break;
 	case cpuidle_expired_ratio:
 		set_value_coregroup(set->cpuidle_gov.expired_ratio, cpu, value);
 		break;
@@ -1298,7 +1377,7 @@ static ssize_t cur_set_read(struct file *file, struct kobject *kobj,
 	struct ontime_dom *dom;
 	char *msg = kcalloc(MSG_SIZE, sizeof(char), GFP_KERNEL);
 	ssize_t count = 0, msg_size;
-	int cpu, cgroup, level;
+	int cpu, cgroup, level, step;
 
 	if (!msg)
 		return 0;
@@ -1328,14 +1407,46 @@ static ssize_t cur_set_read(struct file *file, struct kobject *kobj,
 
 	/* cpufreq gov */
 	count += sprintf(msg + count, "[cpufreq gov]\n");
-	count += sprintf(msg + count, "      %12s %12s %12s %12s\n", "pelt_boost", "htask_boost", "window_count", "htask_ratio_threshold");
+	count += sprintf(msg + count, "      %12s %12s %12s %12s %12s %12s\n", "pelt_boost", "htask_boost", "window_count", "htask_ratio_threshold", "low_pelt_margin", "margin_freq");
 	for_each_possible_cpu(cpu) {
-		count += sprintf(msg + count, "cpu%d: %12d %12d %12d %12d\n", cpu,
+		count += sprintf(msg + count, "cpu%d: %12d %12d %12d %12d 		%12d %12d\n", cpu,
 				cur_set->cpufreq_gov.pelt_boost[cpu],
 				cur_set->cpufreq_gov.htask_boost[cpu],
 				cur_set->cpufreq_gov.window_count[cpu],
-				cur_set->cpufreq_gov.htask_ratio_threshold[cpu]);
+				cur_set->cpufreq_gov.htask_ratio_threshold[cpu],
+				cur_set->cpufreq_gov.low_pelt_margin[cpu],
+				cur_set->cpufreq_gov.margin_freq[cpu]);
 	}
+	count += sprintf(msg + count, "\n");
+
+	count += sprintf(msg + count, "[step flag]\n");
+	count += sprintf(msg + count, "%s : %d\n", "step_latency_enable",
+				cur_set->cpufreq_gov.step_latency_enable);
+	count += sprintf(msg + count, "%s : %d\n", "step_margin_enable",
+				cur_set->cpufreq_gov.step_margin_enable);
+
+	count += sprintf(msg + count, "\n");
+
+	count += sprintf(msg + count, "[step-latency-ns]\n");
+	for_each_possible_cpu(cpu) {
+		count += sprintf(msg + count, "cpu%d: ", cpu);
+		for(step = 0; step < DEFAULT_LATENCY_STEP; step++)
+			count += sprintf(msg + count, "%8d ",
+				cur_set->cpufreq_gov.step_latency_ns[cpu][step]);
+		count += sprintf(msg + count, "\n");
+	}
+
+	count += sprintf(msg + count, "\n");
+
+	count += sprintf(msg + count, "[step-latency-freq]\n");
+	for_each_possible_cpu(cpu) {
+		count += sprintf(msg + count, "cpu%d: ", cpu);
+		for(step = 0; step < DEFAULT_LATENCY_STEP; step++)
+			count += sprintf(msg + count, "%8d ",
+				cur_set->cpufreq_gov.step_latency_freq[cpu][step]);
+		count += sprintf(msg + count, "\n");
+	}
+
 	count += sprintf(msg + count, "\n");
 
 	/* fclamp */

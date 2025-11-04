@@ -2666,7 +2666,7 @@ static int is_next_segment_free(struct f2fs_sb_info *sbi,
  * This function should be returned with success, otherwise BUG
  */
 static int get_new_segment(struct f2fs_sb_info *sbi,
-			unsigned int *newseg, bool new_sec)
+			unsigned int *newseg, bool new_sec, bool pinning)
 {
 	struct free_segmap_info *free_i = FREE_I(sbi);
 	unsigned int segno, secno, zoneno, total_secs;
@@ -2675,7 +2675,8 @@ static int get_new_segment(struct f2fs_sb_info *sbi,
 	unsigned int old_zoneno = GET_ZONE_FROM_SEG(sbi, *newseg);
 	bool init = true;
 	bool retry = false;
-	bool sec_alloc_pin = sbi->pin_guaranteed_blkaddr;
+	bool sec_alloc_pin = pinning && sbi->pin_guaranteed_blkaddr;
+	bool need_bug_on = false;
 	int i;
 	int ret = 0;
 
@@ -2709,7 +2710,6 @@ find_other_zone:
 	if (secno >= total_secs) {
 		secno = find_first_zero_bit(free_i->free_secmap,
 							total_secs);
-		/* TODO: make reserved blocks for pinned type segment */
 		if (unlikely(secno >= total_secs)) {
 			if (sec_alloc_pin) {
 				static bool sec_ddp_log_nofree;
@@ -2719,16 +2719,17 @@ find_other_zone:
 				secno = find_first_zero_bit(free_i->free_secmap,
 							total_secs);
 				if (!sec_ddp_log_nofree) {
-					ST_LOG("[DDP] no free space in the non-shrinkable area, secno: %u",
-							secno);
+					ST_LOG("[DDP] no free space in the non-shrinkable area, secno: %u", secno);
 					sec_ddp_log_nofree = true;
 				}
 				if (unlikely(secno >= MAIN_SECS(sbi))) {
 					ret = -ENOSPC;
+					need_bug_on = true;
 					goto out_unlock;
 				}
 			} else {
 				ret = -ENOSPC;
+				need_bug_on = true;
 				goto out_unlock;
 			}
 		}
@@ -2737,7 +2738,8 @@ find_other_zone:
 	zoneno = GET_ZONE_FROM_SEC(sbi, secno);
 
 	if (!sec_alloc_pin && secno == sbi->pin_reserved_sec) {
-		f2fs_bug_on(sbi, retry);
+		f2fs_bug_on_endio(sbi, retry);
+
 		if (secno + 1 >= total_secs)
 			hint = 0;
 		else
@@ -2770,6 +2772,7 @@ got_it:
 	/* set it as dirty segment in free segmap */
 	if (unlikely(test_bit(segno, free_i->free_segmap))) {
 		ret = -ENOSPC;
+		need_bug_on = true;
 		goto out_unlock;
 	}
 
@@ -2780,7 +2783,7 @@ out_unlock:
 
 	if (ret) {
 		f2fs_stop_checkpoint(sbi, false, STOP_CP_REASON_NO_SEGMENT);
-		f2fs_bug_on(sbi, 1);
+		f2fs_bug_on(sbi, need_bug_on);
 	}
 	return ret;
 }
@@ -2857,11 +2860,13 @@ static void new_curseg(struct f2fs_sb_info *sbi, int type, bool new_sec)
 {
 	struct curseg_info *curseg = CURSEG_I(sbi, type);
 	unsigned int segno = curseg->segno;
+	bool pinning = (type == CURSEG_COLD_DATA_PINNED) && sbi->pin_guaranteed_blkaddr;
 
 	if (curseg->inited)
 		write_sum_page(sbi, curseg->sum_blk, GET_SUM_BLOCK(sbi, segno));
+
 	segno = __get_next_segno(sbi, type);
-	if (get_new_segment(sbi, &segno, new_sec)) {
+	if (get_new_segment(sbi, &segno, new_sec, pinning)) {
 		curseg->segno = NULL_SEGNO;
 		return;
 	}
@@ -3614,7 +3619,6 @@ out_err:
 	mutex_unlock(&curseg->curseg_mutex);
 	f2fs_up_read(&SM_I(sbi)->curseg_lock);
 	return -ENOSPC;
-
 }
 
 void f2fs_update_device_state(struct f2fs_sb_info *sbi, nid_t ino,

@@ -3547,7 +3547,6 @@ vm_fault_t filemap_map_pages(struct vm_fault *vmf,
 		goto out;
 	first_pgoff = xas.xa_index;
 	orig_start_pgoff = xas.xa_index;
-
 #ifdef CONFIG_PAGE_BOOST_RECORDING
 	head_pgoff = xas.xa_index;
 #endif
@@ -3606,13 +3605,14 @@ unlock:
 out:
 	rcu_read_unlock();
 	WRITE_ONCE(file->f_ra.mmap_miss, mmap_miss);
+	trace_android_vh_filemap_map_pages(file, first_pgoff, last_pgoff, ret);
+	trace_android_vh_filemap_map_pages_range(file, orig_start_pgoff, last_pgoff, ret);
+
 #ifdef CONFIG_PAGE_BOOST_RECORDING
 	/* end_pgoff is inclusive */
 	if (ret == VM_FAULT_NOPAGE)
 		record_io_info(file, head_pgoff, last_pgoff - head_pgoff + 1);
 #endif
-	trace_android_vh_filemap_map_pages(file, first_pgoff, last_pgoff, ret);
-	trace_android_vh_filemap_map_pages_range(file, orig_start_pgoff, last_pgoff, ret);
 	return ret;
 }
 EXPORT_SYMBOL(filemap_map_pages);

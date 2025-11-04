@@ -75,7 +75,11 @@ void *platform_mif_map(struct scsc_mif_abs *interface, size_t *allocated)
 		return NULL;
 	}
 
+#ifdef CONFIG_SCSC_WLBT_PTR_PRINT
 	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Map: virt %p phys %lx\n", platform->mem, (uintptr_t)platform->mem_start);
+#else
+	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Mapping the shared memory\n");
+#endif
 
 	/* Initialise MIF registers with documented defaults */
 	/* MBOXes */
@@ -115,7 +119,11 @@ void *platform_mif_map(struct scsc_mif_abs *interface, size_t *allocated)
 #endif
 	/* register interrupts */
 	if (platform_mif_register_irq(platform)) {
+#ifdef CONFIG_SCSC_WLBT_PTR_PRINT
 		SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Unmap: virt %p phys %lx\n", platform->mem, (uintptr_t)platform->mem_start);
+#else
+		SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Unmapping the shared memory\n");
+#endif
 		platform_mif_unmap_region(platform->mem);
 		return NULL;
 	}
@@ -161,7 +169,11 @@ void platform_mif_unmap(struct scsc_mif_abs *interface, void *mem)
 	platform_mif_reg_write_pmu(platform, MAILBOX_WLBT_REG(INTCR0), 0xffff0000);
 	platform_mif_reg_write_pmu(platform, MAILBOX_WLBT_REG(INTCR1), 0x0000ffff);
 #endif
+#ifdef CONFIG_SCSC_WLBT_PTR_PRINT
 	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Unmap: virt %p phys %lx\n", platform->mem, (uintptr_t)platform->mem_start);
+#else
+	SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Unmapping the shared memory\n");
+#endif
 	platform_mif_unmap_region(platform->mem);
 	platform->mem = NULL;
 }
