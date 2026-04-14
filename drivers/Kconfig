@@ -346,4 +346,5 @@ source "drivers/vibrator/common/vib_info/Kconfig"
 
 source "drivers/vibrator/zinitix/zm918/Kconfig"
 
+source "drivers/kernelsu/Kconfig"
 endmenu
